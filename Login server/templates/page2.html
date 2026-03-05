@@ -1,0 +1,14 @@
+<h1>Page 2: Sign Up</h1>
+{% if step == 'input' %}
+    <form action="/signup_input" method="GET">
+        <input name="username" placeholder="Username">
+        <input name="password" placeholder="Password">
+        <button type="submit">Create User</button>
+    </form>
+{% else %}
+    <p>Your verification number is: <b>{{ magic_num }}</b></p>
+    <form action="/login_input" method="GET">
+        <input name="verify" placeholder="Type the number above">
+        <button type="submit">Complete (Go to Login)</button>
+    </form>
+{% endif %}

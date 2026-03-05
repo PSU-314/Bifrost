@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html>
+<head><title>Key Exchange</title></head>
+<body>
+    <h1>Page 2.5: Secure Key Exchange</h1>
+    <p>The Server's Magic Number (Public Key) is: <b>{{ magic_num }}</b></p>
+    
+    <hr>
+    <p>To complete signup, enter your Public Key below.</p>
+    <p><small>Formula: (23 ^ your_private_number) % 775145549137931</small></p>
+
+    <form action="/exchange" method="GET">
+        <input type="hidden" name="magic_num" value="{{ magic_num }}">
+        
+        <input type="number" name="verify" placeholder="Enter your Input Number" required>
+        <button type="submit">Calculate Shared Secret</button>
+    </form>
+</body>
+</html>
