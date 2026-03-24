@@ -2,6 +2,13 @@
 <html>
 <head><title>Key Exchange</title></head>
 <body>
+    <nav>
+    <a href="{{ url_for('page_1') }}">Home</a>
+    {% if session %}
+        | <a href="{{ url_for('logout') }}" style="color: red;">Logout</a>
+    {% endif %}
+    </nav>
+    <hr>
     <h1>Page 2.5: Secure Key Exchange</h1>
     <p>The Server's Magic Number (Public Key) is: <b>{{ magic_num }}</b></p>
     

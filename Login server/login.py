@@ -1,4 +1,5 @@
 from flask import Flask, render_template, request, redirect, url_for, session
+from flask_sqlalchemy import SQLAlchemy
 import secrets
 import hmac
 import hashlib
@@ -8,17 +9,25 @@ import time
 
 app = Flask(__name__)
 app.secret_key = 'dh_secret_key_for_session'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'
+db = SQLAlchemy(app)
 
-# Global Shared Constants
+class User(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True, nullable=False)
+    password = db.Column(db.String(120), nullable=False)
+    shared_secret = db.Column(db.String(255), nullable=True)
+
+with app.app_context():
+    db.create_all()
+
 p = 775145549137931
 g = 23
 
-# User storage
 saved_username = None
 saved_password = None
 shared_secret = None
 
-# Constants from C++ logic
 TIME_WINDOW = 30
 OTP_SIZE = 6
 
@@ -29,8 +38,6 @@ def create_keypair(p, g):
 
 def calculate_shared_secret(remote_public, local_private, p):
     return pow(int(remote_public), int(local_private), p)
-
-# --- TRANSLATED C++ TOTP LOGIC ---
 
 def genSample(key_str, time_val):
     """Translated from uint32_t genSample(std::string &key, std::time_t time)"""
@@ -86,13 +93,20 @@ def page_1():
 
 @app.route('/signup_input')
 def page_2():
-    global saved_username, saved_password
     user = request.args.get('username')
     pw = request.args.get('password')
     
     if user and pw:
-        saved_username = user
-        saved_password = pw
+        
+        if User.query.filter_by(username=user).first():
+            return "User already exists!"
+            
+        new_user = User(username=user, password=pw)
+        db.session.add(new_user)
+        db.session.commit()
+        
+        session['temp_user'] = user 
+        
         priv, pub = create_keypair(p, g)
         session['server_private'] = priv
         return redirect(url_for('page_exchange', magic_num=pub))
@@ -100,50 +114,83 @@ def page_2():
 
 @app.route('/exchange')
 def page_exchange():
-    global shared_secret
     magic_num = request.args.get('magic_num')
     other_public_key = request.args.get('verify')
     
     if other_public_key:
         server_priv = session.get('server_private')
-        if server_priv:
-            shared_secret = calculate_shared_secret(other_public_key, server_priv, p)
-            print("shared secret: ", shared_secret)
+        username = session.get('temp_user')
+        
+        user = User.query.filter_by(username=username).first()
+        if server_priv and user:
+            secret = calculate_shared_secret(other_public_key, server_priv, p)
+            user.shared_secret = str(secret)
+            db.session.commit()
             return f"Secret Established! <br><a href='/login_input'>Proceed to Login</a>"
+        
             
     return render_template('page_exchange.html', magic_num=magic_num)
 
 @app.route('/login_input')
 def page_3():
-    user = request.args.get('username')
-    pw = request.args.get('password')
+    user_input = request.args.get('username')
+    pw_input = request.args.get('password')
     
-    if user == saved_username and pw == saved_password and user is not None:
+    if not user_input or not pw_input:
+        return render_template('page3.html')
+
+    # 1. Find the user in the database
+    user = User.query.filter_by(username=user_input, password=pw_input).first()
+    
+    if user:
+        # 2. Check if they ever finished the key exchange
+        if user.shared_secret is None:
+            # They have an account but no 2FA setup! 
+            # We must restart the exchange process for them.
+            session['temp_user'] = user.username 
+            priv, pub = create_keypair(p, g)
+            session['server_private'] = priv
+            
+            # Send them back to the exchange step
+            return redirect(url_for('page_exchange', magic_num=pub))
+        
+        # 3. Everything is normal, proceed to 2FA
+        session['logged_in_user'] = user.username
         return redirect(url_for('page_4'))
     
-    return render_template('page3.html')
+    return "Invalid credentials. <a href='/login_input'>Try again</a>"
 
 @app.route('/2fa_input')
 def page_4():
-    global shared_secret
     user_code = request.args.get('code')
+    username = session.get('logged_in_user')
     
-    if user_code:
-        # Using the translated C++ logic
-
-        expected_code = generateOTP(shared_secret)
-        
-        if user_code in expected_code:
-            return redirect(url_for('page_5'))
-        else:
-            print("Correct 2FA Code: ", expected_code)
-            return "Invalid 2FA Code. <a href='/2fa_input'>Try again</a>"
+    user = User.query.filter_by(username=username).first()
+    
+    # Safety Check: Does the user even have a secret?
+    if user and user.shared_secret:
+        if user_code:
+            expected_codes = generateOTP(user.shared_secret)
+            if user_code in expected_codes:
+                return redirect(url_for('page_5'))
+            else:
+                return "Invalid 2FA Code. <a href='/2fa_input'>Try again</a>"
+    else:
+        # If they don't have a secret or aren't logged in, boot them back to login
+        return redirect(url_for('page_3'))
             
     return render_template('page4.html')
 
 @app.route('/success')
 def page_5():
     return render_template('page5.html')
+
+@app.route('/logout')
+def logout():
+    # This wipes everything in the session: 
+    # the logged-in user, the temp user, and the server private keys.
+    session.clear() 
+    return redirect(url_for('page_1'))
 
 if __name__ == '__main__':
     app.run(debug=True)

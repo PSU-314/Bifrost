@@ -1,3 +1,10 @@
+<nav>
+    <a href="{{ url_for('page_1') }}">Home</a>
+    {% if session %}
+        | <a href="{{ url_for('logout') }}" style="color: red;">Logout</a>
+    {% endif %}
+</nav>
+<hr>
 <h1>Page 5: Login Successful</h1>
 <p>Welcome! You are logged in via GET requests.</p>
 <a href="/">Restart</a>

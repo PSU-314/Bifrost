@@ -1,3 +1,10 @@
+<nav>
+    <a href="{{ url_for('page_1') }}">Home</a>
+    {% if session %}
+        | <a href="{{ url_for('logout') }}" style="color: red;">Logout</a>
+    {% endif %}
+</nav>
+<hr>
 <h1>Page 4: 2FA</h1>
 <p>Enter the 6-digit code (123456):</p>
 <form action="/2fa_input" method="GET">

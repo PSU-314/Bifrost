@@ -1,3 +1,10 @@
+<nav>
+    <a href="{{ url_for('page_1') }}">Home</a>
+    {% if session %}
+        | <a href="{{ url_for('logout') }}" style="color: red;">Logout</a>
+    {% endif %}
+</nav>
+<hr>
 <h1>Page 3: Log In</h1>
 <form action="/login_input" method="GET">
     <input name="username" placeholder="Username">
