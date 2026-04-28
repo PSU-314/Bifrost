@@ -77,14 +77,15 @@ int main(int argc, char **argv) {
         std::getline(skfile, secretKeyStr);
         skfile.close();
         secretKey = hexToBytes(secretKeyStr);
+        secretKeyStr = bytesToHex(secretKey);
     } else {
         secretKey = secretKey_ECDH();
+        secretKeyStr = bytesToHex(secretKey);
         std::ofstream skfile("secret.key");
-        printBytes(skfile, secretKey);
+        skfile.write(secretKeyStr.c_str(), secretKeyStr.size());
         skfile.close();
     }
 
-    secretKeyStr = bytesToHex(secretKey);
     uint32_t otp = generateOTP(secretKeyStr);
     std::cout << "OTP: " << otp << std::endl;
 }
