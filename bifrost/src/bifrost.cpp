@@ -1,4 +1,3 @@
-#include "DiffieHellman.hpp"
 #include <HMAC-SHA1.hpp>
 #include <MathFns.hpp>
 #include <TypeDefs.hpp>
@@ -8,6 +7,9 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <safecrypt/BG.hpp>
+#include <safecrypt/utility.hpp>
+#include <safecrypt/x25519.hpp>
 #include <string>
 
 namespace fs = std::filesystem;
@@ -39,35 +41,50 @@ uint32_t generateOTP(std::string &key) {
     return genSample(key, curtime) % (uint32_t)std::pow(10, OTP_SIZE);
 }
 
+Bytes secretKey_ECDH() {
+    Bytes secretKey = BigNum::random(256).toBytes();
+    Bytes publicKey = Curve25519::x25519(secretKey, Curve25519::Gx());
+
+    std::cout << "Bifrost Public Key: 0x";
+    printBytes(publicKey);
+    std::cout << std::endl;
+
+    std::cout << "Enter server public key: ";
+    std::string serverKeys;
+    std::cin >> serverKeys;
+
+    if (serverKeys.substr(0, 2) == "0x")
+        serverKeys = serverKeys.substr(2);
+    Bytes serverKey = hexToBytes(serverKeys);
+    Bytes sharedSecret = Curve25519::x25519(secretKey, serverKey);
+
+    std::cout << "Computed shared secret: ";
+    printBytes(sharedSecret);
+    std::cout << std::endl;
+    return sharedSecret;
+}
+
 int main(int argc, char **argv) {
     bool loadSK = true;
     if (!fs::exists("secret.key") || argc > 1) {
         loadSK = false;
     }
 
-    std::string secretKey;
+    Bytes secretKey;
+    std::string secretKeyStr;
     if (loadSK) {
         std::ifstream skfile("secret.key");
-        std::getline(skfile, secretKey);
+        std::getline(skfile, secretKeyStr);
         skfile.close();
+        secretKey = hexToBytes(secretKeyStr);
     } else {
-        num_t g = 23;
-        num_t n = 775145549137931;
-        num_t privateKey = crypto::dh::generatePrivateSecret();
-        num_t publicKey = powMod(g, privateKey, n);
-        num_t loginPublicKey;
-        std::cout << "Bifrost Public Key: " << publicKey << std::endl;
-        std::cout << "Enter public key: ";
-        std::cin >> loginPublicKey;
-
-        secretKey = boost::lexical_cast<std::string>(
-            powMod(loginPublicKey, privateKey, n));
-
+        secretKey = secretKey_ECDH();
         std::ofstream skfile("secret.key");
-        skfile << secretKey;
+        printBytes(skfile, secretKey);
         skfile.close();
     }
 
-    uint32_t otp = generateOTP(secretKey);
+    secretKeyStr = bytesToHex(secretKey);
+    uint32_t otp = generateOTP(secretKeyStr);
     std::cout << "OTP: " << otp << std::endl;
 }

@@ -13,6 +13,8 @@ typedef struct Curve {
               b(b),
               p(p) {}
         Curve() {}
+        bool operator==(const struct Curve &rhs) const;
+        num_t getYFromX(const num_t &x) const;
 } Curve;
 
 class Point {
@@ -32,6 +34,8 @@ class Point {
 };
 std::ostream &operator<<(std::ostream &os, const Point &p);
 
+std::vector<num_t> getYFromX(const num_t &x, const Curve &c);
+
 extern Curve brainpoolP256r1;
 extern Point brainpoolP256r1Generator;
 
@@ -43,7 +47,7 @@ class ECDH {
         num_t privateKey;
 
     public:
-        ECDH(std::string c);
+        ECDH(Curve c);
 
         void generateKeys();
         num_t getPublicKey() const;

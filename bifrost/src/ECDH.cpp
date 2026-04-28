@@ -1,20 +1,37 @@
 #include <ECDH.hpp>
 #include <MathFns.hpp>
 #include <Random.hpp>
+#include <boost/multiprecision/detail/default_ops.hpp>
+#include <boost/multiprecision/detail/integer_ops.hpp>
+#include <boost/multiprecision/integer.hpp>
+#include <cassert>
 #include <iostream>
 
 namespace crypto {
 
 namespace ecdh {
 
+num_t Curve::getYFromX(const num_t &x) const {
+    num_t xmod = mod(x, p);
+    num_t x3 = powMod(xmod, 3, p);
+    num_t ax = mulmod(xmod, a, p);
+    num_t rhs = addmod(x3, addmod(ax, b, p), p);
+    auto ys = modularSqrt(rhs, p);
+    return (ys.first & 1) ? ys.second : ys.first;
+}
+
+bool Curve::operator==(const struct Curve &rhs) const {
+    return a == rhs.a && b == rhs.b && p == rhs.p;
+}
+
 Point Point::operator+(Point const &q) {
     Point r(c);
     num_t s;
     if (x == q.x && y != q.y)
         return Point(x, y, c);
-    if (x == q.x) {
+    if (x == q.x)
         s = ((3 * x * x + c.a) * modularInverse(2 * y, c.p)) % c.p;
-    } else
+    else
         s = ((q.y - y) * modularInverse(q.x - x, c.p)) % c.p;
     r.x = (s * s - x - q.x) % c.p;
     r.y = (s * (x - r.x) - y) % c.p;
@@ -35,12 +52,6 @@ std::ostream &operator<<(std::ostream &os, const Point &p) {
     return os;
 }
 
-// Point getPointFromX(const num_t& x, const Curve& c) {
-//     num_t ysqr = x * x * x + c.a * x + c.b;
-//     num_t y = modularSqrt(ysqr, c.p);
-//     return Point(x, y, c);
-// }
-
 Curve brainpoolP256r1(
     num_t("0x7d5a0975fc2c3057eef67530417affe7fb8055c126dc5c6ce94a4b44f330b5d9"),
     num_t("0x26dc5c6ce94a4b44f330b5d9bbd77cbf958416295cf7e1ce6bccdc18ff8c07b6"),
@@ -51,9 +62,8 @@ Point brainpoolP256r1Generator(
     num_t("0x547ef835c3dac4fd97f8461a14611dc9c27745132ded8e545c1d54c72f046997"),
     brainpoolP256r1);
 
-ECDH::ECDH(std::string c) {
-    if (c == "brainpoolP256r1") {
-        curve = brainpoolP256r1;
+ECDH::ECDH(Curve c) {
+    if (c == brainpoolP256r1) {
         generator = brainpoolP256r1Generator;
     }
 }
