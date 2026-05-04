@@ -19,7 +19,7 @@
     <form action="/exchange" method="GET">
         <input type="hidden" name="magic_num" value="{{ magic_num }}">
         
-        <input type="number" name="verify" placeholder="Enter your Input Number" required>
+        <input type="hexadecimal" name="verify" placeholder="Enter your Input Number" required>
         <button type="submit">Calculate Shared Secret</button>
     </form>
 </body>

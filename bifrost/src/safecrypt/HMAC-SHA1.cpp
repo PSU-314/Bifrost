@@ -1,7 +1,6 @@
-#include <HMAC-SHA1.hpp>
-#include <TypeDefs.hpp>
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
+#include <safecrypt/HMAC-SHA1.hpp>
 
 Bytes generate_hmac_sha1(const std::string &key, const std::string &msg) {
     Bytes hash(20);

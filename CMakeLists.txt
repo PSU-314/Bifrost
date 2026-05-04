@@ -7,7 +7,7 @@ project(bifrost VERSION 1.0 LANGUAGES CXX)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # 2. Set C++ Standard
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # 3. Find Dependencies
@@ -16,7 +16,7 @@ find_package(OpenSSL REQUIRED)
 
 # 4. Gather Source Files
 # This automatically picks up all .cpp files in the src directory
-file(GLOB SOURCES "src/*.cpp")
+file(GLOB SOURCES "bifrost/src/*.cpp" "bifrost/src/safecrypt/*.cpp")
 
 # 5. Define the Executable
 add_executable(${PROJECT_NAME} ${SOURCES})
@@ -24,7 +24,7 @@ add_executable(${PROJECT_NAME} ${SOURCES})
 # 6. Include Headers
 # This tells the compiler to look in the include/ folder
 target_include_directories(${PROJECT_NAME} PRIVATE 
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/bifrost/include
     ${OPENSSL_INCLUDE_DIR}
 )
 
