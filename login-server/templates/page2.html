@@ -1,21 +1,86 @@
-<nav>
-    <a href="{{ url_for('page_1') }}">Home</a>
-    {% if session %}
-        | <a href="{{ url_for('logout') }}" style="color: red;">Logout</a>
+{% extends "base.html" %}
+{% block title %}AUTH2FA — Sign Up{% endblock %}
+
+{% block nav_steps %}
+<div class="step-bar" style="margin-left:auto">
+    <span class="s active">1·SIGNUP</span>
+    <span class="s">2·EXCHANGE</span>
+    <span class="s">3·LOGIN</span>
+    <span class="s">4·2FA</span>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="card {% if show_token %}card-wide{% endif %}">
+
+    {% if show_token %}
+    {# ── Token details: shown after account creation ── #}
+    <div class="page-tag">STEP 1 COMPLETE — ENTER PIN IN AUTHENTICATOR</div>
+    <h1>Exchange <span class="accent">Ready</span></h1>
+
+    <div class="alert alert-info">
+        Enter the 6-digit code below into your authenticator. The app will POST its key to the temporary endpoint.
+        The endpoint self-destructs after one use or {{ "5 minutes" }}.
+    </div>
+
+    <div class="token-row">
+        <div class="token-item" style="flex: 1;">
+            <div class="code-label">6-DIGIT CODE</div>
+            <div class="code-block pin-block" style="font-size: 2rem; text-align: center; letter-spacing: 0.2em;">
+                <span id="pin-val">{{ pin }}</span>
+                <button class="copy-btn" onclick="copyText('pin-val')">COPY</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="code-label" style="margin-top: 20px;">ONE-TIME EXCHANGE ENDPOINT</div>
+    <div class="code-block">
+        <span id="exchange-url">{{ exchange_url }}</span>
+        <button class="copy-btn" onclick="copyText('exchange-url')">COPY</button>
+    </div>
+
+    <hr class="divider">
+
+    <p class="otp-hint">
+        Your authenticator should send a POST request with the <code>client_pub</code> field to the endpoint above.
+    </p>
+
+    <div class="alert alert-info" style="font-family:var(--mono);font-size:.72rem">
+        <strong>Example curl from Authenticator:</strong><br>
+        curl -X POST "{{ exchange_url }}" \<br>
+        &nbsp;&nbsp;-H "Content-Type: application/json" \<br>
+        &nbsp;&nbsp;-d '{"bifrost-public-key": "&lt;your_64_hex_pubkey&gt;"}'
+    </div>
+
+    <div class="link-row">
+        Exchange completed? <a href="{{ url_for('page_3') }}">Proceed to Login →</a>
+    </div>
+
+    {% else %}
+    {# ── Sign-up form ── #}
+    <div class="page-tag">STEP 1 OF 4</div>
+    <h1>Create <span class="accent">Account</span></h1>
+
+    {% if error %}
+    <div class="alert alert-error">{{ error }}</div>
     {% endif %}
-</nav>
-<hr>
-<h1>Page 2: Sign Up</h1>
-{% if step == 'input' %}
-    <form action="/signup_input" method="GET">
-        <input name="username" placeholder="Username">
-        <input name="password" placeholder="Password">
-        <button type="submit">Create User</button>
+
+    <form action="{{ url_for('page_2') }}" method="GET">
+        <div class="field">
+            <label for="username">Username</label>
+            <input id="username" name="username" type="text"
+                   placeholder="min. 3 characters" autocomplete="username" required>
+        </div>
+        <div class="field">
+            <label for="password">Password</label>
+            <input id="password" name="password" type="password"
+                   placeholder="min. 6 characters" autocomplete="new-password" required>
+        </div>
+        <button type="submit" class="btn btn-primary btn-full">CREATE ACCOUNT →</button>
     </form>
-{% else %}
-    <p>Your verification number is: <b>{{ magic_num }}</b></p>
-    <form action="/login_input" method="GET">
-        <input name="verify" placeholder="Type the number above">
-        <button type="submit">Complete (Go to Login)</button>
-    </form>
-{% endif %}
+
+    <div class="link-row">Already have an account? <a href="{{ url_for('page_3') }}">Log in</a></div>
+    {% endif %}
+
+</div>
+{% endblock %}

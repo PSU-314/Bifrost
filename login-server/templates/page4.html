@@ -1,13 +1,52 @@
-<nav>
-    <a href="{{ url_for('page_1') }}">Home</a>
-    {% if session %}
-        | <a href="{{ url_for('logout') }}" style="color: red;">Logout</a>
+{% extends "base.html" %}
+{% block title %}AUTH2FA — 2FA Verification{% endblock %}
+
+{% block nav_steps %}
+<div class="step-bar" style="margin-left:auto">
+    <span class="s done">1·SIGNUP</span>
+    <span class="s done">2·EXCHANGE</span>
+    <span class="s done">3·LOGIN</span>
+    <span class="s active">4·2FA</span>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="page-tag">STEP 4 OF 4 — TOTP</div>
+    <h1>Two-Factor <span class="accent">Code</span></h1>
+
+    {% if error %}
+    <div class="alert alert-error">{{ error }}</div>
     {% endif %}
-</nav>
-<hr>
-<h1>Page 4: 2FA</h1>
-<p>Enter the 6-digit code (123456):</p>
-<form action="/2fa_input" method="GET">
-    <input name="code" placeholder="6-digit code">
-    <button type="submit">Verify Code</button>
-</form>
+
+    <p>Enter the 6-digit code generated from your shared secret.<br>
+       Valid for ±30 seconds around the current window.</p>
+
+    <form action="{{ url_for('page_4') }}" method="GET">
+        <div class="field">
+            <label for="code">6-DIGIT OTP CODE</label>
+            <input id="code" name="code" type="text"
+                   placeholder="000000" maxlength="6" minlength="6"
+                   pattern="[0-9]{6}" inputmode="numeric"
+                   autocomplete="one-time-code" required
+                   style="font-size:1.5rem;letter-spacing:.4em;text-align:center;">
+        </div>
+        <div class="otp-hint">
+            Code rotates every 30 seconds. One previous and one future window are accepted.
+        </div>
+        <button type="submit" class="btn btn-primary btn-full">VERIFY →</button>
+    </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+/* Auto-submit when 6 digits are entered */
+document.getElementById('code').addEventListener('input', function() {
+    if (this.value.replace(/\D/g,'').length === 6) {
+        this.value = this.value.replace(/\D/g,'');
+        this.closest('form').submit();
+    }
+});
+</script>
+{% endblock %}
