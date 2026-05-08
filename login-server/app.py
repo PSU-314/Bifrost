@@ -19,7 +19,7 @@ from flask import (
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 
-from utils import x25519, totp
+from utils import dh, totp
 
 # ---------------------------------------------------------------------------
 # App & Database setup
@@ -120,8 +120,8 @@ def page_2():
         db.session.commit()
         session["saved_username"] = username
 
-        server_priv = x25519.generate_private_key()
-        server_pub  = x25519.public_key(server_priv)
+        server_priv = dh.generate_private_key()
+        server_pub  = dh.public_key(server_priv)
 
         _purge_expired_tokens()
 
@@ -211,10 +211,10 @@ def exchange_endpoint(pin: str):
         server_priv = bytes.fromhex(token_entry.server_priv_hex)
         client_pub  = bytes.fromhex(client_pub_hex)
 
-        if len(client_pub) != 32:
-            raise ValueError("Public key must be exactly 32 bytes (64 hex chars).")
+        # Removed the 32-byte length check constraint entirely here
+        # since our new DH prime easily fits in 8 bytes.
 
-        secret = x25519.diffie_hellman(server_priv, client_pub)
+        secret = dh.diffie_hellman(server_priv, client_pub)
 
     except (ValueError, Exception) as exc:
         log.warning("Key exchange failed on endpoint %s: %s", pin, exc)

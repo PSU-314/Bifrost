@@ -3,3 +3,5 @@ build/
 .cache
 login-server/__pycache__/
 secret.key
+__pycache__
+.db
