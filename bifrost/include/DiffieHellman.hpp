@@ -7,7 +7,7 @@
 #define DH_GEN 23
 #define DH_PRIME 775145549137931
 
-#define SERVER_URL "http://localhost:8000/signup/"
+#define SERVER_URL "http://localhost:5000/signup/"
 
 num_t generatePrivateSecret();
 num_t getServerPublicKey(const num_t &pubKey, const std::string &serverRegCode);

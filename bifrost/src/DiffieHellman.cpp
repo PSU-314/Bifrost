@@ -3,7 +3,6 @@
 #include <TypeDefs.hpp>
 #include <cpr/cpr.h>
 #include <nlohmann/json.hpp>
-#include <sstream>
 #include <utility.hpp>
 
 using json = nlohmann::json;
@@ -16,14 +15,25 @@ num_t generateSharedSecret(const std::string &serverRegCode) {
     num_t privateKey = generatePrivateSecret();
     num_t pubKey = powMod(DH_GEN, privateKey, DH_PRIME);
 
+    std::cout << "Generated DH Private Key: "
+              << bytesToHex(numToBytes(privateKey)) << std::endl;
+    std::cout << "Generated DH Public  key: " << bytesToHex(numToBytes(pubKey))
+              << std::endl;
     num_t serverPublicKey = getServerPublicKey(pubKey, serverRegCode);
+    std::cout << "Received Server DH Public Key: "
+              << bytesToHex(numToBytes(serverPublicKey)) << std::endl;
 
-    return powMod(serverPublicKey, privateKey, DH_PRIME);
+    num_t secretKey = powMod(serverPublicKey, privateKey, DH_PRIME);
+    if (secretKey == -1)
+        return -1;
+    std::cout << "Computed Shared Secret Key: "
+              << bytesToHex(numToBytes(secretKey)) << std::endl;
+    return secretKey;
 }
 
 num_t getServerPublicKey(const num_t &pubKey,
                          const std::string &serverRegCode) {
-    std::string pubKeyStr = BytesToHex(numToBytes(pubKey));
+    std::string pubKeyStr = bytesToHex(numToBytes(pubKey));
     json payload = {{"bifrost-public-key", pubKeyStr}};
 
     cpr::Response r = cpr::Post(
@@ -35,12 +45,10 @@ num_t getServerPublicKey(const num_t &pubKey,
         try {
             json response_data = json::parse(r.text);
 
-            if (response_data.contains("server-public-key")) {
+            if (response_data.contains("server-public-key"))
                 serverkey = num_t(
                     "0x" + std::string(response_data["server-public-key"]));
-                std::cout << "Successfully extracted server public key: "
-                          << serverkey << std::endl;
-            } else {
+            else {
                 std::cerr
                     << "Required fields not found in response. Raw response:\n"
                     << response_data.dump(4) << std::endl;

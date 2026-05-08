@@ -28,7 +28,7 @@ Bytes numToBytes(num_t n, size_t bytes) {
     return num;
 }
 
-std::string BytesToHex(const Bytes &bytes) {
+std::string bytesToHex(const Bytes &bytes) {
     std::stringstream ss;
     ss << std::hex << std::setfill('0');
     for (Byte b : bytes)

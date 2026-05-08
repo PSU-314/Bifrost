@@ -59,7 +59,11 @@ int main(int argc, char **argv) {
 
         secretKey = boost::lexical_cast<std::string>(
             generateSharedSecret(serverRegCode));
-
+        if (secretKey == "-1") {
+            std::cout << "Key Exchange with server failed. Aborting TOTP setup"
+                      << std::endl;
+            return 1;
+        }
         std::ofstream skfile("secret.key");
         skfile << secretKey;
         skfile.close();
