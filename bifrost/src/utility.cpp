@@ -1,7 +1,9 @@
-#include <MathFns.hpp>
 #include <TypeDefs.hpp>
 #include <boost/multiprecision/cpp_int.hpp>
+#include <iomanip>
 #include <iostream>
+#include <sstream>
+#include <utility.hpp>
 
 void printBytes(std::ostream &stream, const Bytes &bytes, bool shorten) {
     if (bytes.size() == 0)
@@ -26,6 +28,14 @@ Bytes numToBytes(num_t n, size_t bytes) {
     return num;
 }
 
+std::string BytesToHex(const Bytes &bytes) {
+    std::stringstream ss;
+    ss << std::hex << std::setfill('0');
+    for (Byte b : bytes)
+        ss << std::setw(2) << static_cast<int>(b);
+    return ss.str();
+}
+
 num_t bytesToNum(const Bytes &bytes) {
     num_t n;
     boost::multiprecision::import_bits(n, bytes.begin(), bytes.end());
@@ -46,18 +56,4 @@ num_t powMod(num_t a, num_t b, num_t p) {
     }
 
     return res;
-}
-
-num_t modularInverse(num_t a, num_t m) {
-    num_t m0 = m;
-    num_t x = 1, y = 0, x1 = 0, y1 = 1, a1 = a, m1 = m;
-    while (m1 > 0) {
-        num_t q = a1 / m1;
-        std::tie(x, x1) = std::make_tuple(x1, x - q * x1);
-        std::tie(y, y1) = std::make_tuple(y1, y - q * y1);
-        std::tie(a1, m1) = std::make_tuple(m1, a1 - q * m1);
-    }
-    if (x < 0)
-        x += m;
-    return x;
 }

@@ -1,6 +1,5 @@
-#include "DiffieHellman.hpp"
+#include <DiffieHellman.hpp>
 #include <HMAC-SHA1.hpp>
-#include <MathFns.hpp>
 #include <TypeDefs.hpp>
 #include <boost/lexical_cast.hpp>
 #include <cstdint>
@@ -9,6 +8,7 @@
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <utility.hpp>
 
 namespace fs = std::filesystem;
 
@@ -47,21 +47,18 @@ int main(int argc, char **argv) {
 
     std::string secretKey;
     if (loadSK) {
+        std::cout << "Using existing secret found" << std::endl;
         std::ifstream skfile("secret.key");
         std::getline(skfile, secretKey);
         skfile.close();
     } else {
-        num_t g = 23;
-        num_t n = 775145549137931;
-        num_t privateKey = crypto::dh::generatePrivateSecret();
-        num_t publicKey = powMod(g, privateKey, n);
-        num_t loginPublicKey;
-        std::cout << "Bifrost Public Key: " << publicKey << std::endl;
-        std::cout << "Enter public key: ";
-        std::cin >> loginPublicKey;
+        std::cout << "No existing secret found, starting new "
+                     "registration.\nEnter the server registration code: ";
+        std::string serverRegCode;
+        std::cin >> serverRegCode;
 
         secretKey = boost::lexical_cast<std::string>(
-            powMod(loginPublicKey, privateKey, n));
+            generateSharedSecret(serverRegCode));
 
         std::ofstream skfile("secret.key");
         skfile << secretKey;

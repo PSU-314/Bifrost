@@ -5,8 +5,6 @@
 #include <boost/random/uniform_int_distribution.hpp>
 #include <random>
 
-namespace crypto {
-
 void Random::generateBytes(Bytes &buffer, size_t count) {
     std::random_device rd;
     std::mt19937 gen(rd());
@@ -39,5 +37,3 @@ num_t Random::generatePrimeNum(size_t bitSize) {
             return candidate;
     }
 }
-
-} // namespace crypto

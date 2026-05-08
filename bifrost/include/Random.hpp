@@ -2,8 +2,6 @@
 
 #include "TypeDefs.hpp"
 
-namespace crypto {
-
 class Random {
     public:
         static void generateBytes(Bytes &buffer, size_t count);
@@ -11,5 +9,3 @@ class Random {
         static num_t generateNum(size_t bitSize);
         static num_t generatePrimeNum(size_t bitSize);
 };
-
-} // namespace crypto
