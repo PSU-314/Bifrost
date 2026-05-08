@@ -1,6 +1,3 @@
-#include <HMAC-SHA1.hpp>
-#include <MathFns.hpp>
-#include <TypeDefs.hpp>
 #include <boost/lexical_cast.hpp>
 #include <cstdint>
 #include <ctime>
@@ -8,6 +5,9 @@
 #include <fstream>
 #include <iostream>
 #include <safecrypt/BG.hpp>
+#include <safecrypt/Types.hpp>
+#include <safecrypt/hkdf.hpp>
+#include <safecrypt/hmac.hpp>
 #include <safecrypt/utility.hpp>
 #include <safecrypt/x25519.hpp>
 #include <string>
@@ -18,8 +18,8 @@ namespace fs = std::filesystem;
 #define OTP_SIZE 6
 
 uint32_t genSample(std::string &key, std::time_t time) {
-    Bytes hash = generate_hmac_sha1(key, std::to_string(time));
-    printBytes(std::cout, hash);
+    Bytes hash = hmac_sha1(key, std::to_string(time));
+    printBytes(hash);
     std::cout << std::endl;
     Byte offset = hash.back() & 0x0F;
     int32_t sample = (hash[offset] << 24) | (hash[offset + 1] << 16) |
@@ -81,6 +81,8 @@ int main(int argc, char **argv) {
     } else {
         secretKey = secretKey_ECDH();
         secretKeyStr = bytesToHex(secretKey);
+
+        // TODO: Write encrypted secret key using hardware indentifiers
         std::ofstream skfile("secret.key");
         skfile.write(secretKeyStr.c_str(), secretKeyStr.size());
         skfile.close();

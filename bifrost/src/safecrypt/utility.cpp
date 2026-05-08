@@ -13,6 +13,10 @@ Byte hexCharToNibble(char c) {
     throw std::invalid_argument("Invalid hex character");
 }
 
+Bytes strToBytes(const std::string &str) {
+    return Bytes(str.begin(), str.end());
+}
+
 Bytes hexToBytes(const std::string &hex) {
     std::string _hex = (hex.length() & 1) ? "0" + hex : hex;
 

@@ -1,1 +1,38 @@
-build/compile_commands.json
+[
+{
+  "directory": "/home/ntronyx/workspace/bifrost",
+  "command": "/usr/bin/c++  -I/home/ntronyx/workspace/bifrost/bifrost/include -std=gnu++20 -o CMakeFiles/bifrost.dir/bifrost/src/bifrost.cpp.o -c /home/ntronyx/workspace/bifrost/bifrost/src/bifrost.cpp",
+  "file": "/home/ntronyx/workspace/bifrost/bifrost/src/bifrost.cpp",
+  "output": "CMakeFiles/bifrost.dir/bifrost/src/bifrost.cpp.o"
+},
+{
+  "directory": "/home/ntronyx/workspace/bifrost",
+  "command": "/usr/bin/c++  -I/home/ntronyx/workspace/bifrost/bifrost/include -std=gnu++20 -o CMakeFiles/bifrost.dir/bifrost/src/safecrypt/BG.cpp.o -c /home/ntronyx/workspace/bifrost/bifrost/src/safecrypt/BG.cpp",
+  "file": "/home/ntronyx/workspace/bifrost/bifrost/src/safecrypt/BG.cpp",
+  "output": "CMakeFiles/bifrost.dir/bifrost/src/safecrypt/BG.cpp.o"
+},
+{
+  "directory": "/home/ntronyx/workspace/bifrost",
+  "command": "/usr/bin/c++  -I/home/ntronyx/workspace/bifrost/bifrost/include -std=gnu++20 -o CMakeFiles/bifrost.dir/bifrost/src/safecrypt/hkdf.cpp.o -c /home/ntronyx/workspace/bifrost/bifrost/src/safecrypt/hkdf.cpp",
+  "file": "/home/ntronyx/workspace/bifrost/bifrost/src/safecrypt/hkdf.cpp",
+  "output": "CMakeFiles/bifrost.dir/bifrost/src/safecrypt/hkdf.cpp.o"
+},
+{
+  "directory": "/home/ntronyx/workspace/bifrost",
+  "command": "/usr/bin/c++  -I/home/ntronyx/workspace/bifrost/bifrost/include -std=gnu++20 -o CMakeFiles/bifrost.dir/bifrost/src/safecrypt/hmac.cpp.o -c /home/ntronyx/workspace/bifrost/bifrost/src/safecrypt/hmac.cpp",
+  "file": "/home/ntronyx/workspace/bifrost/bifrost/src/safecrypt/hmac.cpp",
+  "output": "CMakeFiles/bifrost.dir/bifrost/src/safecrypt/hmac.cpp.o"
+},
+{
+  "directory": "/home/ntronyx/workspace/bifrost",
+  "command": "/usr/bin/c++  -I/home/ntronyx/workspace/bifrost/bifrost/include -std=gnu++20 -o CMakeFiles/bifrost.dir/bifrost/src/safecrypt/utility.cpp.o -c /home/ntronyx/workspace/bifrost/bifrost/src/safecrypt/utility.cpp",
+  "file": "/home/ntronyx/workspace/bifrost/bifrost/src/safecrypt/utility.cpp",
+  "output": "CMakeFiles/bifrost.dir/bifrost/src/safecrypt/utility.cpp.o"
+},
+{
+  "directory": "/home/ntronyx/workspace/bifrost",
+  "command": "/usr/bin/c++  -I/home/ntronyx/workspace/bifrost/bifrost/include -std=gnu++20 -o CMakeFiles/bifrost.dir/bifrost/src/safecrypt/x25519.cpp.o -c /home/ntronyx/workspace/bifrost/bifrost/src/safecrypt/x25519.cpp",
+  "file": "/home/ntronyx/workspace/bifrost/bifrost/src/safecrypt/x25519.cpp",
+  "output": "CMakeFiles/bifrost.dir/bifrost/src/safecrypt/x25519.cpp.o"
+}
+]
