@@ -17,7 +17,6 @@ namespace fs = std::filesystem;
 
 uint32_t genSample(std::string &key, std::time_t time) {
     Bytes hash = generate_hmac_sha1(key, std::to_string(time));
-    printBytes(std::cout, hash);
     std::cout << std::endl;
     Byte offset = hash.back() & 0x0F;
     int32_t sample = (hash[offset] << 24) | (hash[offset + 1] << 16) |
