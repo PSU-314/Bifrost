@@ -46,24 +46,28 @@ int main(int argc, char **argv) {
     }
 
     std::string secretKey;
+    Bytes secretKeyBytes;
     if (loadSK) {
         std::cout << "Using existing secret found" << std::endl;
         std::ifstream skfile("secret.key");
         std::getline(skfile, secretKey);
         skfile.close();
+        secretKeyBytes = numToBytes(num_t("0x" + secretKey));
+        secretKeyBytes = resizeKey(secretKeyBytes, KEY_SIZE);
+        secretKey = bytesToHex(secretKeyBytes);
     } else {
         std::cout << "No existing secret found, starting new "
                      "registration.\nEnter the server registration code: ";
         std::string serverRegCode;
         std::cin >> serverRegCode;
 
-        secretKey = boost::lexical_cast<std::string>(
-            generateSharedSecret(serverRegCode));
-        if (secretKey == "-1") {
+        secretKeyBytes = generateSharedSecret(serverRegCode);
+        if (secretKeyBytes.empty()) {
             std::cout << "Key Exchange with server failed. Aborting TOTP setup"
                       << std::endl;
             return 1;
         }
+        secretKey = bytesToHex(secretKeyBytes);
         std::ofstream skfile("secret.key");
         skfile << secretKey;
         skfile.close();

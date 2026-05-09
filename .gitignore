@@ -1,3 +1,5 @@
 bifrost/build/
 .cache/
+login-server/utils/__pycache__/
 build/
+secret.key
