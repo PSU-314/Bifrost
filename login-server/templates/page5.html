@@ -1,10 +1,17 @@
-<nav>
-    <a href="{{ url_for('page_1') }}">Home</a>
-    {% if session %}
-        | <a href="{{ url_for('logout') }}" style="color: red;">Logout</a>
-    {% endif %}
-</nav>
-<hr>
-<h1>Page 5: Login Successful</h1>
-<p>Welcome! You are logged in via GET requests.</p>
-<a href="/">Restart</a>
+{% extends "base.html" %}
+{% block title %}AUTH2FA — Success{% endblock %}
+
+{% block content %}
+<div class="card hero-card">
+    <div class="success-icon">✓</div>
+    <div class="page-tag">AUTHENTICATION COMPLETE</div>
+    <h1>Access <span class="accent">Granted</span></h1>
+    <p>Welcome back, <strong>{{ username }}</strong>.<br>
+       All authentication steps passed successfully.</p>
+
+    <div class="btn-row">
+        <a href="{{ url_for('page_1') }}" class="btn">START OVER</a>
+        <a href="{{ url_for('logout') }}" class="btn">LOGOUT</a>
+    </div>
+</div>
+{% endblock %}

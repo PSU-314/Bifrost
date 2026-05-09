@@ -1,26 +1,76 @@
-<!DOCTYPE html>
-<html>
-<head><title>Key Exchange</title></head>
-<body>
-    <nav>
-    <a href="{{ url_for('page_1') }}">Home</a>
-    {% if session %}
-        | <a href="{{ url_for('logout') }}" style="color: red;">Logout</a>
-    {% endif %}
-    </nav>
-    <hr>
-    <h1>Page 2.5: Secure Key Exchange</h1>
-    <p>The Server's Magic Number (Public Key) is: <b>{{ magic_num }}</b></p>
-    
-    <hr>
-    <p>To complete signup, enter your Public Key below.</p>
-    <p><small>Formula: (23 ^ your_private_number) % 775145549137931</small></p>
+{% extends "base.html" %}
+{% block title %}AUTH2FA — Key Exchange{% endblock %}
 
-    <form action="/exchange" method="GET">
-        <input type="hidden" name="magic_num" value="{{ magic_num }}">
-        
-        <input type="number" name="verify" placeholder="Enter your Input Number" required>
-        <button type="submit">Calculate Shared Secret</button>
+{% block nav_steps %}
+<div class="step-bar" style="margin-left:auto">
+    <span class="s done">1·SIGNUP</span>
+    <span class="s active">2·EXCHANGE</span>
+    <span class="s">3·LOGIN</span>
+    <span class="s">4·2FA</span>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="card card-wide">
+
+    {% if expired %}
+    {# ── Token already used or expired ── #}
+    <div class="page-tag">ENDPOINT CONSUMED</div>
+    <h1>Link <span class="accent" style="color:var(--accent2)">Expired</span></h1>
+    <div class="alert alert-error">
+        This exchange endpoint has already been used or has expired (5-minute TTL).<br>
+        Single-use endpoints are destroyed on first successful access.
+    </div>
+    <div class="link-row">
+        <a href="{{ url_for('page_2') }}">← Sign up again to generate a new link</a>
+    </div>
+
+    {% else %}
+    {# ── Active exchange form ── #}
+    <div class="page-tag">STEP 2 OF 4 — X25519 DIFFIE-HELLMAN · SINGLE-USE ENDPOINT</div>
+    <h1>Key <span class="accent">Exchange</span></h1>
+
+    {% if error %}
+    <div class="alert alert-error">{{ error }}</div>
+    {% endif %}
+
+    <div class="alert alert-info">
+        This endpoint will be <strong>permanently destroyed</strong> after one
+        successful POST. Verify the PIN before submitting.
+    </div>
+
+    <div class="code-label">SERVER PUBLIC KEY</div>
+    <div class="code-block">
+        <span id="server-pub">{{ server_pub }}</span>
+        <button class="copy-btn" onclick="copyText('server-pub')">COPY</button>
+    </div>
+
+    <hr class="divider">
+
+    <form action="{{ url_for('exchange_endpoint', token=token) }}" method="POST">
+        <div class="field">
+            <label for="pin">6-DIGIT PIN (from signup page)</label>
+            <input id="pin" name="pin" type="text"
+                   placeholder="000000" maxlength="6" minlength="6"
+                   pattern="[0-9]{6}" inputmode="numeric"
+                   style="letter-spacing:.4em;font-size:1.2rem;text-align:center;"
+                   autocomplete="off" required>
+        </div>
+        <div class="field">
+            <label for="client_pub">YOUR PUBLIC KEY (64 hex chars)</label>
+            <input id="client_pub" name="client_pub" type="text"
+                   placeholder="e.g. 8520f009893..." maxlength="64" minlength="64"
+                   pattern="[0-9a-fA-F]{64}" autocomplete="off" required>
+        </div>
+        <button type="submit" class="btn btn-primary btn-full">ESTABLISH SHARED SECRET →</button>
     </form>
-</body>
-</html>
+
+    <hr class="divider">
+    <p class="otp-hint">
+        Derive your public key with: <code>X25519(your_private_key, BASE_POINT)</code><br>
+        Then enter the resulting 32-byte value as 64 lowercase hex characters.
+    </p>
+    {% endif %}
+
+</div>
+{% endblock %}

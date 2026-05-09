@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}AUTH2FA{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    {% block head %}{% endblock %}
+</head>
+<body>
+
+<nav>
+    <a class="nav-brand" href="{{ url_for('page_1') }}">AUTH2FA</a>
+    <span class="nav-sep">|</span>
+    <a href="{{ url_for('page_1') }}">HOME</a>
+    {% block nav_steps %}{% endblock %}
+    {% if session.get('saved_username') %}
+        <a href="{{ url_for('logout') }}" class="nav-logout">LOGOUT</a>
+    {% endif %}
+</nav>
+
+<main>
+    {% block content %}{% endblock %}
+</main>
+
+<footer>AUTH2FA DEMO &mdash; X25519 KEY EXCHANGE + TOTP &mdash; EDUCATIONAL USE ONLY</footer>
+
+<script>
+function copyText(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    navigator.clipboard.writeText(el.innerText).then(() => {
+        const btn = el.parentElement.querySelector('.copy-btn');
+        if (btn) { btn.innerText = 'COPIED'; setTimeout(() => btn.innerText = 'COPY', 1500); }
+    });
+}
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>
