@@ -1,1 +1,1 @@
-web: python app.py
+web: python login-server/app.py
