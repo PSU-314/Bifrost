@@ -1,1 +1,0 @@
-web: python login-server/app.py
