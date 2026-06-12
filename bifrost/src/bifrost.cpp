@@ -1,4 +1,3 @@
-#include <DiffieHellman.hpp>
 #include <HMAC-SHA1.hpp>
 #include <TypeDefs.hpp>
 #include <boost/lexical_cast.hpp>
@@ -8,14 +7,17 @@
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <tls.hpp>
 #include <utility.hpp>
 
 namespace fs = std::filesystem;
 
 #define TIME_WINDOW 30
 #define OTP_SIZE 6
+#define TOTP_KEY_FILE "totp.key"
+#define TOTP_KEY_LEN 32
 
-uint32_t genSample(std::string &key, std::time_t time) {
+uint32_t genSample(const Bytes &key, std::time_t time) {
     Bytes hash = generate_hmac_sha1(key, std::to_string(time));
     std::cout << std::endl;
     Byte offset = hash.back() & 0x0F;
@@ -25,12 +27,13 @@ uint32_t genSample(std::string &key, std::time_t time) {
     return sample;
 }
 
-uint32_t generateOTP(std::string &key) {
+uint32_t generateOTP(const Bytes &key) {
     std::time_t epoch = std::time(nullptr);
     std::time_t curtime = epoch / TIME_WINDOW;
 
-    std::cout << "Key: " << key << std::endl;
-    std::cout << "Time: " << epoch << std::endl;
+    std::cout << "Key: ";
+    printBytes(std::cout, key);
+    std::cout << std::endl << "Time: " << epoch << std::endl;
     std::cout << "Expires in: " << TIME_WINDOW - epoch % TIME_WINDOW
               << std::endl
               << std::endl;
@@ -39,39 +42,31 @@ uint32_t generateOTP(std::string &key) {
 }
 
 int main(int argc, char **argv) {
-    bool loadSK = true;
-    if (!fs::exists("secret.key") || argc > 1) {
-        loadSK = false;
-    }
-
-    std::string secretKey;
-    Bytes secretKeyBytes;
-    if (loadSK) {
-        std::cout << "Using existing secret found" << std::endl;
-        std::ifstream skfile("secret.key");
-        std::getline(skfile, secretKey);
-        skfile.close();
-        secretKeyBytes = numToBytes(num_t("0x" + secretKey));
-        secretKeyBytes = resizeKey(secretKeyBytes, KEY_SIZE);
-        secretKey = bytesToHex(secretKeyBytes);
-    } else {
+    Bytes totpKey;
+    if (!fs::exists(TOTP_KEY_FILE) || argc > 1) {
         std::cout << "No existing secret found, starting new "
                      "registration.\nEnter the server registration code: ";
         std::string serverRegCode;
         std::cin >> serverRegCode;
 
-        secretKeyBytes = generateSharedSecret(serverRegCode);
-        if (secretKeyBytes.empty()) {
+        totpKey = establishTOTPKey(serverRegCode, TOTP_KEY_LEN);
+        if (totpKey.empty()) {
             std::cout << "Key Exchange with server failed. Aborting TOTP setup"
                       << std::endl;
             return 1;
         }
-        secretKey = bytesToHex(secretKeyBytes);
-        std::ofstream skfile("secret.key");
-        skfile << secretKey;
+
+        std::ofstream skfile(TOTP_KEY_FILE, std::ios::binary);
+        skfile.write(reinterpret_cast<const char *>(totpKey.data()),
+                     totpKey.size());
+        skfile.close();
+    } else {
+        std::ifstream skfile(TOTP_KEY_FILE, std::ios::binary);
+        totpKey.resize(TOTP_KEY_LEN);
+        skfile.read(reinterpret_cast<char *>(totpKey.data()), TOTP_KEY_LEN);
         skfile.close();
     }
 
-    uint32_t otp = generateOTP(secretKey);
+    uint32_t otp = generateOTP(totpKey);
     std::cout << "OTP: " << otp << std::endl;
 }

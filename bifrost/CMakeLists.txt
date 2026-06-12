@@ -14,25 +14,6 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Finds OpenSSL on Arch Linux (provided by libssl-dev/openssl)
 find_package(OpenSSL REQUIRED)
 
-include(FetchContent)
-FetchContent_Declare(
-    json
-    GIT_REPOSITORY https://github.com/nlohmann/json.git
-    GIT_TAG v3.11.3
-)
-FetchContent_MakeAvailable(json)
-
-# Fetch CPR (C++ Requests)
-FetchContent_Declare(
-    cpr
-    GIT_REPOSITORY https://github.com/libcpr/cpr.git
-    GIT_TAG 1.10.5 # Or stable release of your choice
-)
-# Disable CPR's internal tests and PDF generation to keep build times fast
-set(CPR_BUILD_TESTS OFF CACHE INTERNAL "")
-FetchContent_MakeAvailable(cpr)
-
-
 # 4. Gather Source Files
 # This automatically picks up all .cpp files in the src directory
 file(GLOB SOURCES "src/*.cpp")
@@ -52,6 +33,4 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 target_link_libraries(${PROJECT_NAME} PRIVATE 
     OpenSSL::Crypto
     OpenSSL::SSL
-    cpr::cpr
-    nlohmann_json::nlohmann_json
 )

@@ -40,15 +40,17 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <HKDF.hpp>
+#include <TypeDefs.hpp>
 #include <bits/stdc++.h>
 #include <cstring>
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <tls.hpp>
+#include <utility.hpp>
 
-using Byte = uint8_t;
-using Bytes = std::vector<Byte>;
-Bytes exporterSecret;
+static Bytes exporterSecret;
 
 // ─── Exception helper
 // ─────────────────────────────────────────────────────────
@@ -59,7 +61,7 @@ static void throw_ssl_error(const std::string &context) {
     throw std::runtime_error(context + ": " + buf);
 }
 
-static void setExporterBytes(const SSL *ssl, const char *line) {
+static void setExporterSecret(const SSL *ssl, const char *line) {
     (void)ssl;
 
     std::string s(line);
@@ -162,7 +164,7 @@ SSL_CTX *create_client_ctx(
     SSL_CTX_set_options(ctx, SSL_OP_NO_COMPRESSION);
 
     // -- Register keylog callback
-    SSL_CTX_set_keylog_callback(ctx, setExporterBytes);
+    SSL_CTX_set_keylog_callback(ctx, setExporterSecret);
 
     return ctx;
 }
@@ -266,7 +268,7 @@ void tls_send(SSL *ssl, const void *data, size_t len) {
     }
 }
 
-std::string tls_recv(SSL *ssl, size_t max_bytes = 4096) {
+std::string tls_recv(SSL *ssl, size_t max_bytes) {
     std::string buf(max_bytes, '\0');
     int n = SSL_read(ssl, buf.data(), static_cast<int>(max_bytes));
     if (n <= 0)
@@ -291,39 +293,54 @@ void tls_shutdown(SSL *ssl, int tcp_fd) {
 
 // ─── main
 // ─────────────────────────────────────────────────────────────────────
+Bytes fetchPWKey(SSL *ssl, int tcp_fd, std::string serverRegCode) {
+    std::string request = "GET " SERVER_REG_PATH + serverRegCode +
+                          " HTTP/1.1\r\n"
+                          "Host: " +
+                          SERVER_HOST +
+                          "\r\n"
+                          "Connection: close\r\n\r\n";
+    std::stringstream requestStream;
+    requestStream << "GET " << SERVER_REG_PATH << serverRegCode
+                  << " HTTP/1.1\r\n";
+    requestStream << "Host: " << SERVER_HOST << "\r\n";
+    requestStream << "Connection: close\r\n\r\n";
 
-int main() {
+    tls_send(ssl, request.c_str(), request.length());
+    std::string resp = tls_recv(ssl);
+    if (!resp.starts_with(SERVER_RESPONSE_PREFIX)) {
+        tls_shutdown(ssl, tcp_fd);
+        throw std::runtime_error("Server response had invalid prefix");
+    }
+    return hexToBytes(
+        resp.substr(std::string_view(SERVER_RESPONSE_PREFIX).size()));
+}
+
+Bytes establishTOTPKey(std::string serverRegCode, size_t totpKeyLen) {
     SSL_load_error_strings();
     OpenSSL_add_ssl_algorithms();
-
-    // Paths relative to the directory you run the binary from.
-    // These must match the PKI layout produced by the gen-*.sh scripts.
-    const char *ca_cert = "../pki/root-ca/root-ca.crt";
-    const char *client_chain =
-        "../pki/client/client-chain.pem"; // leaf + intermediate
-    const char *client_key = "../pki/client/client.key";
-
-    const char *server_host = "localhost";
-    const uint16_t server_port = 8443;
 
     SSL_CTX *ctx = nullptr;
     SSL *ssl = nullptr;
     int fd = -1;
+    Bytes totpKey;
 
     try {
-        ctx = create_client_ctx(ca_cert, client_chain, client_key);
-        fd = connect_tcp(server_host, server_port);
-        ssl = tls_connect(ctx, fd, server_host);
+        ctx = create_client_ctx(CA_CERT, BIFROST_CERT_CHAIN, BIFROST_KEY);
+        fd = connect_tcp(SERVER_HOST, SERVER_PORT);
+        ssl = tls_connect(ctx, fd, SERVER_HOST);
 
-        // ── Send a test message
-        // ───────────────────────────────────────────────
         std::cout << "Exporter Secret: " << std::hex << std::setfill('0');
         for (auto x : exporterSecret)
             std::cout << std::setw(2) << (int)x;
         std::cout << std::dec << std::endl;
 
-        std::string pw_key = tls_recv(ssl);
-        std::cout << "[Serve]: PW_KEY: " << pw_key << "\n";
+        Bytes pwKey = fetchPWKey(ssl, fd, serverRegCode);
+
+        // Perform HKDF
+        std::string infoStr = "bifrost-totp-key";
+        Bytes info(infoStr.begin(), infoStr.end());
+        hkdf_sha256(exporterSecret, pwKey, info, totpKeyLen, totpKey);
 
         tls_shutdown(ssl, fd);
         ssl = nullptr;
@@ -336,9 +353,8 @@ int main() {
         if (fd >= 0)
             close(fd);
         SSL_CTX_free(ctx);
-        return 1;
     }
 
     SSL_CTX_free(ctx);
-    return 0;
+    return totpKey;
 }

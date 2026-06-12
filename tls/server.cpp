@@ -34,13 +34,18 @@
 #include <unistd.h>
 
 #include <atomic>
+#include <bits/stdc++.h>
 #include <cstring>
 #include <iostream>
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <vector>
 
 static std::atomic<bool> g_running{true};
+using Byte = uint8_t;
+using Bytes = std::vector<Byte>;
+Bytes exporterSecret;
 
 // ─── Exception helper
 // ─────────────────────────────────────────────────────────
@@ -49,6 +54,33 @@ static void throw_ssl_error(const std::string &ctx) {
     char buf[256];
     ERR_error_string_n(ERR_get_error(), buf, sizeof(buf));
     throw std::runtime_error(ctx + ": " + buf);
+}
+
+static void setExporterBytes(const SSL *ssl, const char *line) {
+    (void)ssl;
+
+    std::string s(line);
+    auto first_sp = s.find(' ');
+    auto second_sp = s.find(' ', first_sp + 1);
+
+    if (first_sp == std::string::npos || second_sp == std::string::npos)
+        return;
+
+    std::string label = s.substr(0, first_sp);
+    if (label != "EXPORTER_SECRET")
+        return;
+    std::string secret_hex = s.substr(second_sp + 1);
+    if (secret_hex.size() % 2 != 0) {
+        std::cerr << "[KeyLog] Malformed hex string (odd length)\n";
+        return;
+    }
+
+    exporterSecret.resize(secret_hex.size() / 2);
+    for (size_t i = 0; i < secret_hex.size(); i += 2) {
+        char byte_str[3] = {secret_hex[i], secret_hex[i + 1], '\0'};
+        unsigned long byte_val = std::strtoul(byte_str, nullptr, 16);
+        exporterSecret[i / 2] = (Byte)byte_val;
+    }
 }
 
 // ─── SSL_CTX factory
@@ -159,6 +191,8 @@ SSL_CTX *create_server_ctx(const char *cert_pem, const char *key_pem,
     // Ensures AES-256-GCM is chosen even if the client prefers AES-128-GCM.
     SSL_CTX_set_options(ctx, SSL_OP_CIPHER_SERVER_PREFERENCE);
 
+    SSL_CTX_set_keylog_callback(ctx, setExporterBytes);
+
     return ctx;
 }
 
@@ -216,36 +250,52 @@ void handle_connection(SSL *ssl, int client_fd, std::string peer_addr) {
     // ── Application data loop (echo — replace with TOTP protocol logic)
     // ─────── CRYPTO_memcmp for constant-time token comparisons.
     // OPENSSL_cleanse to wipe buffers — defeats compiler elision of memset.
-    char buf[4096];
-    while (true) {
-        int n = SSL_read(ssl, buf, static_cast<int>(sizeof(buf) - 1));
+    // char buf[4096];
+    // while (true) {
+    //     int n = SSL_read(ssl, buf, static_cast<int>(sizeof(buf) - 1));
+    //
+    //     if (n <= 0) {
+    //         int err = SSL_get_error(ssl, n);
+    //         if (err == SSL_ERROR_ZERO_RETURN)
+    //             std::cout << "[" << peer_addr
+    //                       << "] Client disconnected cleanly\n";
+    //         else
+    //             std::cerr << "[" << peer_addr << "] SSL_read error: " << err
+    //                       << "\n";
+    //         break;
+    //     }
+    //
+    //     buf[n] = '\0';
+    //     std::cout << "[" << peer_addr << "] Received (" << n
+    //               << " bytes): " << buf << "\n";
+    //
+    //     int sent = 0;
+    //     while (sent < n) {
+    //         int w = SSL_write(ssl, buf + sent, n - sent);
+    //         if (w <= 0) {
+    //             std::cerr << "[" << peer_addr << "] SSL_write error\n";
+    //             goto done;
+    //         }
+    //         sent += w;
+    //     }
+    //
+    //     OPENSSL_cleanse(buf, static_cast<size_t>(n));
+    // }
 
-        if (n <= 0) {
-            int err = SSL_get_error(ssl, n);
-            if (err == SSL_ERROR_ZERO_RETURN)
-                std::cout << "[" << peer_addr
-                          << "] Client disconnected cleanly\n";
-            else
-                std::cerr << "[" << peer_addr << "] SSL_read error: " << err
-                          << "\n";
-            break;
+    std::cout << "Exporter Secret: " << std::hex << std::setfill('0');
+    for (auto x : exporterSecret)
+        std::cout << std::setw(2) << (int)x;
+    std::cout << std::dec << std::endl;
+    std::string buf =
+        "8a2bbe3940bbb4092cc176d91c846cb29c253932c8f34d56431f20ad20d8cdf4";
+    int sent = 0;
+    while (sent < buf.size()) {
+        int w = SSL_write(ssl, buf.data() + sent, buf.size() - sent);
+        if (w <= 0) {
+            std::cerr << "[" << peer_addr << "] SSL_write error\n";
+            goto done;
         }
-
-        buf[n] = '\0';
-        std::cout << "[" << peer_addr << "] Received (" << n
-                  << " bytes): " << buf << "\n";
-
-        int sent = 0;
-        while (sent < n) {
-            int w = SSL_write(ssl, buf + sent, n - sent);
-            if (w <= 0) {
-                std::cerr << "[" << peer_addr << "] SSL_write error\n";
-                goto done;
-            }
-            sent += w;
-        }
-
-        OPENSSL_cleanse(buf, static_cast<size_t>(n));
+        sent += w;
     }
 
 done:
