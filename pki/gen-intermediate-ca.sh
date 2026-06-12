@@ -26,7 +26,7 @@ chmod 600 intermediate-ca/intermediate-ca.key
 
 openssl req -new \
   -key intermediate-ca/intermediate-ca.key \
-  -subj "/C=US/O=InterOrg/CN=InterOrg Intermediate CA" \
+  -subj "/C=US/O=KeySign/CN=KeySign Intermediate CA" \
   -out intermediate-ca/intermediate-ca.csr
 
 cat > /tmp/intermediate-ca.cnf << 'EOF'

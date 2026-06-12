@@ -1,35 +1,6 @@
 #!/bin/bash
-# test-handshake.sh
-#
-# Tests the full mTLS handshake using openssl s_server / s_client.
-# Run from the same directory that contains root-ca/, intermediate-ca/,
-# server/, and client/.
-#
-# FIXES vs your original failing command:
-#
-#   Bug 1: All certs signed by the same intermediate (enforced by AKID check
-#          in gen-server-ca.sh and gen-client-ca.sh).
-#
-#   Bug 2: -Verify depth changed from 1 → 2
-#          With a 3-level chain (root→intermediate→leaf) you need depth 2:
-#            depth 0 = client leaf cert
-#            depth 1 = intermediate CA
-#            depth 2 = root CA
-#          -Verify 1 stops the walk at the intermediate and never confirms
-#          the root is trusted — the verify error is silent but the chain
-#          is not fully validated.
-#
-#   Bug 3: -cert_chain flag used instead of concatenated chain in -cert.
-#          The -cert flag in s_server loads ONLY the end-entity cert for
-#          the server's own identity. The chain (intermediate certs) must
-#          be supplied separately via -cert_chain. Using -cert for the
-#          chain PEM works for the server's own cert sending, but
-#          structurally -cert_chain is the correct flag.
-#
-#   Bug 4: Client sends client-chain.pem (leaf + intermediate), NOT
-#          client.crt alone. The server's CAfile contains only the root;
-#          it cannot verify the client cert unless the client sends the
-#          intermediate in the TLS Certificate message.
+
+# NOTE: This script is faulty
 
 set -e
 
@@ -107,7 +78,7 @@ openssl s_server \
   -CAfile     root-ca/root-ca.crt \
   -Verify 2 \
   -port 8443 \
-  -tls1_2 &
+  -tls1_3 &
 SERVER_PID=$!
 echo "Server PID: $SERVER_PID"
 sleep 1
@@ -129,7 +100,8 @@ echo "PING" | openssl s_client \
   -CAfile   root-ca/root-ca.crt \
   -cert     client/client-chain.pem \
   -key      client/client.key \
-  -tls1_2   \
+  -tls1_3   \
+  -verify_return_error \
   -brief
 
 CLIENT_EXIT=$?

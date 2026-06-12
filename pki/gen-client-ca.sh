@@ -27,7 +27,7 @@ chmod 600 client/client.key
 
 openssl req -new \
   -key client/client.key \
-  -subj "/C=US/O=MyOrg/CN=Bifrost" \
+  -subj "/C=US/O=Bifrost/CN=Bifrost" \
   -out client/client.csr
 
 cat > /tmp/client.cnf << 'EOF'

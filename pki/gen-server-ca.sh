@@ -17,7 +17,7 @@ chmod 600 server/server.key
 
 openssl req -new \
   -key server/server.key \
-  -subj "/C=US/O=MyOrg/CN=localhost" \
+  -subj "/C=US/O=LoginServer/CN=localhost" \
   -out server/server.csr
 
 cat > /tmp/server.cnf << 'EOF'
