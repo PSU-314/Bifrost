@@ -2,12 +2,20 @@
 #include <TypeDefs.hpp>
 #include <boost/lexical_cast.hpp>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <ctime>
+#include <fcntl.h>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <pty.h> // openpty
 #include <string>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 #include <tls.hpp>
+#include <unistd.h>
 #include <utility.hpp>
 
 namespace fs = std::filesystem;
@@ -16,6 +24,9 @@ namespace fs = std::filesystem;
 #define OTP_SIZE 6
 #define TOTP_KEY_FILE "totp.key"
 #define TOTP_KEY_LEN 32
+
+const std::string FIFO_PATH = "/tmp/bifrost-term-fifo";
+const std::string SENTINEL_FLAG = "--in-terminal";
 
 uint32_t genSample(const Bytes &key, std::time_t time) {
     Bytes hash = generate_hmac_sha1(key, std::to_string(time));
@@ -41,7 +52,38 @@ uint32_t generateOTP(const Bytes &key) {
     return genSample(key, curtime) % (uint32_t)std::pow(10, OTP_SIZE);
 }
 
+void launchInTerminal(const std::string selfPath, int argc, char **argv) {
+    std::string innerCmd = "\"" + selfPath + "\" " + SENTINEL_FLAG;
+    for (int i = 1; i < argc; i++)
+        innerCmd += " \"" + std::string(argv[i]) + "\"";
+    execlp("terminator", "terminator", "-e", innerCmd.c_str(), (char *)nullptr);
+    std::perror("Failed to exec terminal emulator");
+    exit(EXIT_FAILURE);
+}
+
 int main(int argc, char **argv) {
+    bool inTerminal =
+        (argc > 1 && std::strcmp(argv[1], SENTINEL_FLAG.c_str()) == 0);
+    if (!inTerminal) {
+        char selfPath[4096];
+        ssize_t len =
+            readlink("/proc/self/exe", selfPath, sizeof(selfPath) - 1);
+        if (len == -1) {
+            std::perror("readlink(/proc/self/exe) failed");
+            return EXIT_FAILURE;
+        }
+        selfPath[len] = 0;
+
+        pid_t pid = fork();
+        if (pid == -1) {
+            std::perror("fork failed");
+            return EXIT_FAILURE;
+        }
+        if (pid == 0)
+            launchInTerminal(selfPath, argc, argv);
+        return EXIT_SUCCESS;
+    }
+
     Bytes totpKey;
     if (!fs::exists(TOTP_KEY_FILE) || argc > 1) {
         std::cout << "No existing secret found, starting new "

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Bifrost Authentication
+Exec=alacritty --hold -e /home/ntronyx/workspace/bifrost/black_window %u
+Icon=utilities-terminal
+Terminal=false
+NoDisplay=true
+MimeType=x-scheme-handler/bifrost-totp;
