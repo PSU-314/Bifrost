@@ -1,7 +1,6 @@
 #include <HMAC-SHA1.hpp>
 #include <KeyStore.hpp>
 #include <TypeDefs.hpp>
-#include <boost/lexical_cast.hpp>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -15,24 +14,13 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <terminal-launch.hpp>
 #include <tls.hpp>
 #include <totp.hpp>
 #include <unistd.h>
 #include <utility.hpp>
 
 namespace fs = std::filesystem;
-
-const std::string SENTINEL_FLAG = "--in-terminal";
-
-void launchInTerminal(const std::string selfPath, int argc, char **argv) {
-    std::string innerCmd = "bash -c '\"" + selfPath + "\" " + SENTINEL_FLAG;
-    for (int i = 1; i < argc; i++)
-        innerCmd += " \"" + std::string(argv[i]) + "\"";
-    innerCmd += " ; exec bash'";
-    execlp("terminator", "terminator", "-x", innerCmd.c_str(), (char *)nullptr);
-    std::perror("Failed to exec terminal emulator");
-    exit(EXIT_FAILURE);
-}
 
 void unlockBifrost() {
     Bytes encKey;
@@ -53,16 +41,20 @@ void unlockBifrost() {
 int main(int argc, char **argv) {
     bool inTerminal =
         (argc > 1 && std::strcmp(argv[1], SENTINEL_FLAG.c_str()) == 0);
+
     if (!inTerminal) {
-        char selfPath[4096];
-        ssize_t len =
-            readlink("/proc/self/exe", selfPath, sizeof(selfPath) - 1);
-        if (len == -1) {
-            std::perror("readlink(/proc/self/exe) failed");
+        std::string selfPath;
+        try {
+            selfPath = getSelfPath();
+        } catch (const std::exception &e) {
+            std::fprintf(stderr, "%s\n", e.what());
             return EXIT_FAILURE;
         }
-        selfPath[len] = 0;
 
+#if defined(_WIN32)
+        launchInTerminal(selfPath, argc, argv);
+        return EXIT_SUCCESS;
+#else
         pid_t pid = fork();
         if (pid == -1) {
             std::perror("fork failed");
@@ -71,6 +63,7 @@ int main(int argc, char **argv) {
         if (pid == 0)
             launchInTerminal(selfPath, argc, argv);
         return EXIT_SUCCESS;
+#endif
     }
 
     Paths::init();
@@ -80,6 +73,7 @@ int main(int argc, char **argv) {
 
     std::cout << "Current Keys: " << std::endl;
     auto keys = KeyStore::getAllKeys();
+    std::cout << keys.size() << std::endl;
     for (auto key : keys) {
         std::cout << key->commonName << ": \n";
         std::cout << "    fingerprint: ";
@@ -90,6 +84,18 @@ int main(int argc, char **argv) {
         std::cout << std::endl;
     }
     std::cout << std::endl;
+
+    // Bytes fg = hexToBytes(
+    //     "1d5b3b8ab3ef69cc680d105be88aec702125b7eba47e58ac630e2277b35be03a");
+    // Key k;
+    // k.fingerprint = fg;
+    // k.commonName = "test2";
+    // k.sans.push_back("san3");
+    // k.sans.push_back("san4");
+    // k.secret = SecureBytes(hexToBytes("a615e4c7ab8ac4530ff1160f138c881b"));
+    // KeyStore::store(k);
+    // KeyStore::saveStore();
+    // return 0;
 
     Bytes totpKey;
     if (!fs::exists(TOTP_KEY_FILE) || argc > 1) {
