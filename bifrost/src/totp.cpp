@@ -1,7 +1,23 @@
 #include <math.h>
+#include <openssl/evp.h>
+#include <openssl/hmac.h>
+#include <securebytes.hpp>
 #include <totp.hpp>
 
-uint32_t genSample(const Bytes &key, std::time_t time) {
+Bytes generate_hmac_sha1(const SecureBytes &key, const std::string &msg) {
+    Bytes hash(20);
+    unsigned int len = 0;
+
+    if (!HMAC(EVP_sha1(), key.data(), key.size(),
+              reinterpret_cast<const unsigned char *>(msg.c_str()),
+              msg.length(), hash.data(), &len)) {
+        return Bytes();
+    }
+
+    return hash;
+}
+
+uint32_t genSample(const SecureBytes &key, std::time_t time) {
     Bytes hash = generate_hmac_sha1(key, std::to_string(time));
     std::cout << std::endl;
     Byte offset = hash.back() & 0x0F;
@@ -11,16 +27,11 @@ uint32_t genSample(const Bytes &key, std::time_t time) {
     return sample;
 }
 
-uint32_t generateOTP(const Bytes &key) {
+TOTP generateOTP(const SecureBytes &key) {
     std::time_t epoch = std::time(nullptr);
     std::time_t curtime = epoch / TIME_WINDOW;
 
-    std::cout << "Key: ";
-    printBytes(std::cout, key);
-    std::cout << std::endl << "Time: " << epoch << std::endl;
-    std::cout << "Expires in: " << TIME_WINDOW - epoch % TIME_WINDOW
-              << std::endl
-              << std::endl;
-
-    return genSample(key, curtime) % (uint32_t)std::pow(10, OTP_SIZE);
+    int otp = genSample(key, curtime) % (uint32_t)std::pow(10, OTP_SIZE);
+    int validity = TIME_WINDOW - epoch % TIME_WINDOW;
+    return {otp, validity};
 }

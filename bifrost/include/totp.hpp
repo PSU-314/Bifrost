@@ -1,6 +1,6 @@
 #pragma once
-#include <HMAC-SHA1.hpp>
 #include <TypeDefs.hpp>
+#include <securebytes.hpp>
 #include <utility.hpp>
 
 #define TIME_WINDOW 30
@@ -8,5 +8,14 @@
 #define TOTP_KEY_FILE "totp.key"
 #define TOTP_KEY_LEN 32
 
-uint32_t genSample(const Bytes &key, std::time_t time);
-uint32_t generateOTP(const Bytes &key);
+struct TOTP {
+        int otp, validity;
+
+        TOTP(int otp, int validity)
+            : otp(otp),
+              validity(validity) {}
+};
+
+Bytes generate_hmac_sha1(const SecureBytes &key, const std::string &msg);
+uint32_t genSample(const SecureBytes &key, std::time_t time);
+TOTP generateOTP(const SecureBytes &key);

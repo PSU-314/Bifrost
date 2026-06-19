@@ -1,12 +1,9 @@
-#include <HMAC-SHA1.hpp>
 #include <KeyStore.hpp>
 #include <TypeDefs.hpp>
-#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <fcntl.h>
 #include <filesystem>
-#include <fstream>
 #include <iostream>
 #include <openssl/sha.h>
 #include <securebytes.hpp>
@@ -21,6 +18,16 @@
 #include <utility.hpp>
 
 namespace fs = std::filesystem;
+
+void printProgressBar(float percentage, int totalLen) {
+    std::cout << "[";
+    int nFilled = percentage * totalLen;
+    for (int i = 0; i < nFilled; i++)
+        std::cout << "#";
+    for (int i = 0; i < totalLen - nFilled; i++)
+        std::cout << "-";
+    std::cout << "]";
+}
 
 void unlockBifrost() {
     Bytes encKey;
@@ -69,21 +76,28 @@ int main(int argc, char **argv) {
     Paths::init();
     unlockBifrost();
 
-    std::cout << "\033[2J\033[1;1H" << std::flush;
-
-    std::cout << "Current Keys: " << std::endl;
     auto keys = KeyStore::getAllKeys();
-    std::cout << keys.size() << std::endl;
-    for (auto key : keys) {
-        std::cout << key->commonName << ": \n";
-        std::cout << "    fingerprint: ";
-        printBytes(std::cout, key->fingerprint);
-        std::cout << "\n    SANs: ";
-        for (auto s : key->sans)
-            std::cout << s << " ";
+
+    while (true) {
+        std::cout << "\033[2J\033[1;1H" << std::flush;
+        std::cout << "Current Keys: " << std::endl;
+        for (auto key : keys) {
+            std::cout << key->commonName << ": \n";
+            std::cout << "    fingerprint: ";
+            printBytes(std::cout, key->fingerprint);
+            std::cout << "\n    SANs: ";
+            for (auto s : key->sans)
+                std::cout << s << " ";
+            std::cout << std::endl;
+            auto [otp, validity] = generateOTP(key->secret);
+            std::cout << "    TOTP: " << otp << std::endl;
+            std::cout << "    Validity: " << validity << "s\n    ";
+            printProgressBar((float)validity / TIME_WINDOW, 30);
+            std::cout << std::endl << std::endl;
+        }
         std::cout << std::endl;
+        usleep(500000);
     }
-    std::cout << std::endl;
 
     // Bytes fg = hexToBytes(
     //     "1d5b3b8ab3ef69cc680d105be88aec702125b7eba47e58ac630e2277b35be03a");
@@ -96,32 +110,4 @@ int main(int argc, char **argv) {
     // KeyStore::store(k);
     // KeyStore::saveStore();
     // return 0;
-
-    Bytes totpKey;
-    if (!fs::exists(TOTP_KEY_FILE) || argc > 1) {
-        std::cout << "No existing secret found, starting new "
-                     "registration.\nEnter the server registration code: ";
-        std::string serverRegCode;
-        std::cin >> serverRegCode;
-
-        totpKey = establishTOTPKey(serverRegCode, TOTP_KEY_LEN);
-        if (totpKey.empty()) {
-            std::cout << "Key Exchange with server failed. Aborting TOTP setup"
-                      << std::endl;
-            return 1;
-        }
-
-        std::ofstream skfile(TOTP_KEY_FILE, std::ios::binary);
-        skfile.write(reinterpret_cast<const char *>(totpKey.data()),
-                     totpKey.size());
-        skfile.close();
-    } else {
-        std::ifstream skfile(TOTP_KEY_FILE, std::ios::binary);
-        totpKey.resize(TOTP_KEY_LEN);
-        skfile.read(reinterpret_cast<char *>(totpKey.data()), TOTP_KEY_LEN);
-        skfile.close();
-    }
-
-    uint32_t otp = generateOTP(totpKey);
-    std::cout << "OTP: " << otp << std::endl;
 }
