@@ -69,6 +69,19 @@ std::string bytesToHex(const Bytes &bytes) {
     return ss.str();
 }
 
+Bytes timeToBytes(const std::time_t time) {
+    Bytes bytes;
+    bytes.reserve(8);
+
+    std::time_t t = time;
+    for (int b = 0; b < 8; b++) {
+        bytes[b] = static_cast<Byte>(t & 0xFF);
+        t >>= 8;
+    }
+
+    return bytes;
+}
+
 void writeu32(Bytes &out, uint32_t v) {
     out.push_back(static_cast<Byte>(v & 0xFF));
     out.push_back(static_cast<Byte>((v >> 8) & 0xFF));

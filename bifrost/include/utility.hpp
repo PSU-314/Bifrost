@@ -16,6 +16,7 @@ struct BytesHash {
 void printBytes(std::ostream &stream, const Bytes &bytes, bool shorten = true);
 Bytes hexToBytes(std::string_view hex);
 std::string bytesToHex(const Bytes &bytes);
+Bytes timeToBytes(const std::time_t time);
 
 void writeu32(Bytes &out, uint32_t v);
 uint32_t readu32(const Byte *p);

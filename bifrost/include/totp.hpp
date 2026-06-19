@@ -6,6 +6,7 @@
 #define TIME_WINDOW 30
 #define OTP_SIZE 6
 #define TOTP_KEY_LEN 32
+#define TOTP_DIGEST_SIZE 20
 
 struct TOTP {
         int otp, validity;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <TypeDefs.hpp>
+#include <securebytes.hpp>
 
-void hkdf_sha256(const Bytes &ikm, const Bytes &salt, const Bytes &info,
-                 size_t outLen, Bytes &okm);
+void hkdf_sha256(const SecureBytes &ikm, const Bytes &salt, const Bytes &info,
+                 size_t outLen, SecureBytes &okm);

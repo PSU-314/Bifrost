@@ -18,6 +18,7 @@
 #include <utility.hpp>
 #include <vector>
 
+#define KEY_STORE_ENC_KEY_SIZE 32
 #define BLOB_NONCE_SIZE 12
 #define BLOB_TAG_SIZE 16
 const Bytes STORE_SIGNATURE{0x42, 0x4B, 0x53, 0x4D, 0x00, 0x01, 0x00, 0x02};
@@ -34,10 +35,7 @@ struct Key {
         Key(Key &&) noexcept = default;
         Key &operator=(Key &&) noexcept = default;
 
-        ~Key() {
-            if (!secret.empty())
-                OPENSSL_cleanse(secret.data(), secret.size());
-        }
+        ~Key() = default;
 
         size_t size() const;
         Bytes serialize() const;
@@ -68,7 +66,7 @@ class KeyStore {
         static std::vector<std::string> extractSANs(X509 *cert);
         static Key buildKey(X509 *cert);
 
-        static void store(X509 *cert, Bytes &secret);
+        static void store(X509 *cert, SecureBytes &&secret);
         static void store(Key &key);
         static const Key *lookup(const Bytes &fingerprint);
         static std::vector<const Key *> lookup(const std::string &cn);

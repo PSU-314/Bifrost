@@ -21,8 +21,9 @@
 namespace fs = std::filesystem;
 
 void printProgressBar(float percentage, int totalLen) {
+    percentage = std::clamp(percentage, 0.0f, 1.0f);
     std::cout << "[";
-    int nFilled = percentage * totalLen;
+    int nFilled = static_cast<int>(percentage * totalLen);
     for (int i = 0; i < nFilled; i++)
         std::cout << "#";
     for (int i = 0; i < totalLen - nFilled; i++)
@@ -49,6 +50,7 @@ void unlockBifrost() {
     } catch (const std::runtime_error &e) {
         std::cerr << "Incorrect password! KeyStore Decryption failed"
                   << std::endl;
+        exit(EXIT_FAILURE);
     }
 }
 

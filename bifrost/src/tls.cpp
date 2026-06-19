@@ -29,6 +29,7 @@
  *   client/client.key
  */
 
+#include "securebytes.hpp"
 #include <openssl/crypto.h>
 #include <openssl/err.h>
 #include <openssl/ssl.h>
@@ -340,7 +341,8 @@ Bytes establishTOTPKey(std::string serverRegCode, size_t totpKeyLen) {
         // Perform HKDF
         std::string infoStr = "bifrost-totp-key";
         Bytes info(infoStr.begin(), infoStr.end());
-        hkdf_sha256(exporterSecret, pwKey, info, totpKeyLen, totpKey);
+        SecureBytes secureTotpKey = SecureBytes(totpKey);
+        hkdf_sha256(exporterSecret, pwKey, info, totpKeyLen, secureTotpKey);
 
         tls_shutdown(ssl, fd);
         ssl = nullptr;

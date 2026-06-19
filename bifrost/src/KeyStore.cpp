@@ -3,6 +3,9 @@
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
+#include <memory>
+#include <openssl/crypto.h>
+#include <openssl/evp.h>
 #include <securebytes.hpp>
 #include <stdexcept>
 #include <utility.hpp>
@@ -93,6 +96,7 @@ Bytes EncryptedBlob::serialize() const {
 
 EncryptedBlob EncryptedBlob::deserialize(const Bytes &data) {
     EncryptedBlob blob;
+    constexpr size_t headerSize = 1 + BLOB_NONCE_SIZE + 4 + BLOB_TAG_SIZE;
 
     if (data.empty())
         throw std::runtime_error("Could not deserialize blob: empty data");
@@ -100,23 +104,21 @@ EncryptedBlob EncryptedBlob::deserialize(const Bytes &data) {
     if (blob.version != 1)
         throw std::runtime_error(
             "Could not deserialize blob: unsupported version");
-
-    if (data.size() < 1 + BLOB_NONCE_SIZE)
+    if (data.size() < headerSize)
         throw std::runtime_error("Could not deserialize blob");
-    blob.nonce = Bytes(data.begin() + 1, data.begin() + 1 + BLOB_NONCE_SIZE);
 
+    blob.nonce = Bytes(data.begin() + 1, data.begin() + 1 + BLOB_NONCE_SIZE);
     uint32_t cipherSize = readu32(data.data() + 1 + BLOB_NONCE_SIZE);
 
-    // TODO: Handle overflow errors
-    if (data.size() != 1 + BLOB_NONCE_SIZE + 4 + cipherSize + BLOB_TAG_SIZE)
+    if (cipherSize > data.size() - headerSize)
+        throw std::runtime_error("cipherSize exceeds available buffer");
+    if (data.size() != headerSize + cipherSize)
         throw std::runtime_error(
-            "Could not deserialize blob: invalid data size");
+            "Could not deserialize blob: cipherSize exceeds available buffer");
 
-    blob.ciphertext =
-        Bytes(data.begin() + 1 + BLOB_NONCE_SIZE + 4,
-              data.begin() + 1 + BLOB_NONCE_SIZE + 4 + cipherSize);
-    blob.tag =
-        Bytes(data.begin() + 1 + BLOB_NONCE_SIZE + 4 + cipherSize, data.end());
+    auto cipherStart = data.begin() + 1 + BLOB_NONCE_SIZE + 4;
+    blob.ciphertext = Bytes(cipherStart, cipherStart + cipherSize);
+    blob.tag = Bytes(cipherStart + cipherSize, data.end());
 
     return blob;
 }
@@ -127,14 +129,13 @@ SecureBytes KeyStore::_encryptionKey;
 std::unordered_map<Bytes, Key, BytesHash> KeyStore::_store;
 
 void KeyStore::init(Bytes &encryptionKey) {
-    assert(encryptionKey.size() == 32 &&
-           "Could not decrypt KeyStore: given key was of incorrect len");
+    if (encryptionKey.size() != KEY_STORE_ENC_KEY_SIZE)
+        throw std::runtime_error(
+            "Could not initialize KeyStore: given key was of incorrect length");
 
     _encryptionKey = SecureBytes(encryptionKey);
-
-    if (fs::exists(Paths::keyfile())) {
+    if (fs::exists(Paths::keyfile()))
         loadStore();
-    }
 }
 
 size_t KeyStore::size() {
@@ -147,21 +148,36 @@ size_t KeyStore::size() {
 Bytes KeyStore::computeFingerprint(X509 *cert) {
     unsigned char *der;
     int derLen = i2d_X509(cert, &der);
-    if (derLen < 0)
+    if (derLen < 0 || !der)
         throw std::runtime_error("Failed to DER-encode certificate");
 
-    unsigned char digest[SHA256_DIGEST_LENGTH];
-    SHA256(der, derLen, digest);
+    unsigned char digest[EVP_MAX_MD_SIZE];
+    unsigned int digestLen = 0;
+    EVP_MD_CTX *mdctx = EVP_MD_CTX_new();
+    if (!mdctx || EVP_DigestInit_ex(mdctx, EVP_sha256(), nullptr) != 1 ||
+        EVP_DigestUpdate(mdctx, der, derLen) != 1 ||
+        EVP_DigestFinal_ex(mdctx, digest, &digestLen) != 1) {
+        if (mdctx)
+            EVP_MD_CTX_free(mdctx);
+        OPENSSL_free(der);
+        throw std::runtime_error("Failed to compute certificate fingerprint");
+    }
+    EVP_MD_CTX_free(mdctx);
     OPENSSL_free(der);
-    return Bytes(digest, digest + SHA256_DIGEST_LENGTH);
+    return Bytes(digest, digest + digestLen);
 }
 
 std::string KeyStore::extractCN(X509_NAME *name) {
-    char buf[256]{0};
-    int len = X509_NAME_get_text_by_NID(name, NID_commonName, buf, sizeof(buf));
+    int len = X509_NAME_get_text_by_NID(name, NID_commonName, nullptr, 0);
     if (len < 0)
         return "";
-    return std::string(buf, len);
+    std::string buf(static_cast<size_t>(len) + 1, '\0');
+    int written = X509_NAME_get_text_by_NID(name, NID_commonName, buf.data(),
+                                            static_cast<int>(buf.size()));
+    if (written < 0)
+        return "";
+    buf.resize(static_cast<size_t>(written));
+    return buf;
 }
 
 std::vector<std::string> KeyStore::extractSANs(X509 *cert) {
@@ -194,9 +210,9 @@ Key KeyStore::buildKey(X509 *cert) {
     return key;
 }
 
-void KeyStore::store(X509 *cert, Bytes &secret) {
+void KeyStore::store(X509 *cert, SecureBytes &&secret) {
     Key key = buildKey(cert);
-    key.secret = SecureBytes(secret);
+    key.secret = std::move(secret);
     OPENSSL_cleanse(secret.data(), secret.size());
     _store[key.fingerprint] = std::move(key);
 }
@@ -249,9 +265,14 @@ Bytes KeyStore::serialize() {
 void KeyStore::deserialize(const Bytes &data) {
     _store.clear();
 
+    if (data.size() < 4)
+        throw std::runtime_error("Truncated KeyStore data: missing key count");
     uint32_t nKeys = readu32(data.data());
     size_t offset = 4;
     for (uint32_t i = 0; i < nKeys; i++) {
+        if (data.size() < 4 + offset)
+            throw std::runtime_error(
+                "Truncated KeyStore: missing key size field");
         uint32_t keySize = readu32(data.data() + offset);
         if (data.size() < offset + 4 + keySize)
             throw std::runtime_error(
@@ -355,8 +376,8 @@ void KeyStore::decryptStore(const EncryptedBlob &blob) {
     plaintext.resize(outlen + finallen);
 
     if (plaintext.size() < STORE_SIGNATURE.size() ||
-        !std::equal(STORE_SIGNATURE.begin(), STORE_SIGNATURE.end(),
-                    plaintext.begin())) {
+        CRYPTO_memcmp(plaintext.data(), STORE_SIGNATURE.data(),
+                      STORE_SIGNATURE.size()) != 0) {
         OPENSSL_cleanse(plaintext.data(), plaintext.size());
         throw std::runtime_error(
             "Decrypted data missing expected store signature");
