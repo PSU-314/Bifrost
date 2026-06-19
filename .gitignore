@@ -1,5 +1,6 @@
 .cache/
 bifrost/build/
+bifrost/test/
 login-server/utils/__pycache__/
 login-server/bifrost.db
 build/

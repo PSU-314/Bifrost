@@ -4,53 +4,24 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <ctime>
 #include <fcntl.h>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
-#include <pty.h> // openpty
 #include <string>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <tls.hpp>
+#include <totp.hpp>
 #include <unistd.h>
 #include <utility.hpp>
 
 namespace fs = std::filesystem;
 
-#define TIME_WINDOW 30
-#define OTP_SIZE 6
-#define TOTP_KEY_FILE "totp.key"
-#define TOTP_KEY_LEN 32
-
-const std::string FIFO_PATH = "/tmp/bifrost-term-fifo";
+const fs::path DATA_DIR = "~/.local/share/bifrost";
+const fs::path KEY_STORAGE = DATA_DIR / "totp.keys";
 const std::string SENTINEL_FLAG = "--in-terminal";
-
-uint32_t genSample(const Bytes &key, std::time_t time) {
-    Bytes hash = generate_hmac_sha1(key, std::to_string(time));
-    std::cout << std::endl;
-    Byte offset = hash.back() & 0x0F;
-    int32_t sample = (hash[offset] << 24) | (hash[offset + 1] << 16) |
-                     (hash[offset + 2] << 8) | hash[offset + 3];
-    sample &= 0x7FFFFFFF;
-    return sample;
-}
-
-uint32_t generateOTP(const Bytes &key) {
-    std::time_t epoch = std::time(nullptr);
-    std::time_t curtime = epoch / TIME_WINDOW;
-
-    std::cout << "Key: ";
-    printBytes(std::cout, key);
-    std::cout << std::endl << "Time: " << epoch << std::endl;
-    std::cout << "Expires in: " << TIME_WINDOW - epoch % TIME_WINDOW
-              << std::endl
-              << std::endl;
-
-    return genSample(key, curtime) % (uint32_t)std::pow(10, OTP_SIZE);
-}
 
 void launchInTerminal(const std::string selfPath, int argc, char **argv) {
     std::string innerCmd = "\"" + selfPath + "\" " + SENTINEL_FLAG;
@@ -59,6 +30,14 @@ void launchInTerminal(const std::string selfPath, int argc, char **argv) {
     execlp("terminator", "terminator", "-e", innerCmd.c_str(), (char *)nullptr);
     std::perror("Failed to exec terminal emulator");
     exit(EXIT_FAILURE);
+}
+
+void setupDirectories() {
+    if (!fs::exists(DATA_DIR)) {
+        fs::create_directories(DATA_DIR);
+        std::cout << "Created bifrost data directories" << std::endl;
+    }
+    std::cout << fs::exists(DATA_DIR) << std::endl;
 }
 
 int main(int argc, char **argv) {
@@ -83,7 +62,7 @@ int main(int argc, char **argv) {
             launchInTerminal(selfPath, argc, argv);
         return EXIT_SUCCESS;
     }
-
+    setupDirectories();
     Bytes totpKey;
     if (!fs::exists(TOTP_KEY_FILE) || argc > 1) {
         std::cout << "No existing secret found, starting new "

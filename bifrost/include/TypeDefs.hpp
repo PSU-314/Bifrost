@@ -1,10 +1,30 @@
 #pragma once
 
-#include <boost/multiprecision/cpp_int.hpp>
 #include <cstdint>
+#include <filesystem>
 #include <vector>
+namespace fs = std::filesystem;
 
 using Byte = uint8_t;
 using Bytes = std::vector<Byte>;
 
-using num_t = boost::multiprecision::cpp_int;
+#define DEFAULT_KEYFILE "totp-secrets.keys"
+
+class Paths {
+    private:
+        static std::string _keyfile;
+
+    public:
+        static void init() {
+            auto cnfgdir = configDir();
+            if (!fs::exists(cnfgdir))
+                fs::create_directories(cnfgdir);
+            _keyfile = DEFAULT_KEYFILE;
+        }
+
+        static fs::path homeDir() { return fs::path(std::getenv("HOME")); }
+        static fs::path configDir() { return homeDir() / ".config/bifrost"; }
+
+        static void setKeyfile(const std::string &file) { _keyfile = file; }
+        static fs::path keyfile() { return configDir() / _keyfile; }
+};

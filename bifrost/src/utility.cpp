@@ -1,10 +1,14 @@
 #include <TypeDefs.hpp>
-#include <boost/multiprecision/cpp_int.hpp>
+#include <fcntl.h>
+#include <filesystem>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
+#include <sys/stat.h>
+#include <unistd.h>
 #include <utility.hpp>
+using namespace fs;
 
 constexpr int hex_char_to_int(char c) noexcept {
     if (c >= '0' && c <= '9')
@@ -31,12 +35,6 @@ void printBytes(std::ostream &stream, const Bytes &bytes, bool shorten) {
             stream << std::hex << ((b & 0xF0) >> 4) << (b & 0x0F);
     }
     stream << std::dec;
-}
-
-Bytes numToBytes(num_t n, size_t bytes) {
-    Bytes num;
-    boost::multiprecision::export_bits(n, std::back_inserter(num), 8);
-    return num;
 }
 
 Bytes hexToBytes(std::string_view hex) {
@@ -71,24 +69,100 @@ std::string bytesToHex(const Bytes &bytes) {
     return ss.str();
 }
 
-num_t bytesToNum(const Bytes &bytes) {
-    num_t n;
-    boost::multiprecision::import_bits(n, bytes.begin(), bytes.end());
-    return n;
+void writeu32(Bytes &out, uint32_t v) {
+    out.push_back(static_cast<Byte>(v & 0xFF));
+    out.push_back(static_cast<Byte>((v >> 8) & 0xFF));
+    out.push_back(static_cast<Byte>((v >> 16) & 0xFF));
+    out.push_back(static_cast<Byte>((v >> 24) & 0xFF));
 }
 
-num_t powMod(num_t a, num_t b, num_t p) {
-    num_t res = 1;
-    a %= p;
-    if (a == 0)
-        return 0;
+uint32_t readu32(const Byte *p) {
+    return static_cast<uint32_t>(p[0]) | static_cast<uint32_t>(p[1] << 8) |
+           static_cast<uint32_t>(p[2] << 16) |
+           static_cast<uint32_t>(p[3] << 24);
+}
 
-    while (b > 0) {
-        if (b % 2 == 1)
-            res = (res * a) % p;
-        b /= 2;
-        a = (a * a) % p;
+Bytes readField(const Bytes &data, size_t &offset) {
+    if (offset + 4 > data.size())
+        throw std::runtime_error("Truncated length prefix");
+    uint32_t len = readu32(data.data() + offset);
+    offset += 4;
+
+    if (len > data.size() - offset)
+        throw std::runtime_error("Field length exceeds remaining buffer");
+
+    Bytes field(data.begin() + offset, data.begin() + offset + len);
+    offset += len;
+    return field;
+}
+
+void writeAtomic(const fs::path &path, const Bytes &data, uint32_t perms) {
+    fs::path tmp(path.string() + ".tmp");
+
+    int fd = ::open(tmp.c_str(), O_WRONLY | O_CREAT | O_TRUNC, perms);
+    if (fd < 0)
+        throw std::runtime_error("Failed to open tmp file for atomic write: " +
+                                 tmp.string());
+
+    ssize_t written = ::write(fd, data.data(), data.size());
+    if (written < 0 || static_cast<size_t>(written) != data.size()) {
+        ::close(fd);
+        throw std::runtime_error(
+            "Failed to write to tmp file for atomic write");
     }
 
-    return res;
+    if (::fsync(fd) != 0) {
+        ::close(fd);
+        throw std::runtime_error("fsync failed on tmp file");
+    }
+    ::close(fd);
+
+    std::error_code ec;
+    fs::rename(tmp, path, ec);
+    if (ec)
+        throw std::runtime_error("Atomic rename failed");
+
+    int dirfd = ::open(path.parent_path().c_str(), O_RDONLY);
+    if (dirfd >= 0) {
+        ::fsync(dirfd);
+        ::close(dirfd);
+    }
+}
+
+Bytes readAtomic(const fs::path &path) {
+    int fd = ::open(path.c_str(), O_RDONLY);
+    if (fd < 0)
+        throw std::runtime_error("Failed to open file for atomic read: " +
+                                 path.string());
+
+    std::error_code ec;
+    uintmax_t size = fs::file_size(path, ec);
+    if (ec) {
+        ::close(fd);
+        throw std::runtime_error("Failed to stat file for atomic read: " +
+                                 path.string());
+    }
+
+    Bytes data;
+    if (size > 0)
+        data.resize(static_cast<size_t>(size));
+
+    size_t total = 0;
+    while (total < data.size()) {
+        ssize_t n = ::read(fd, data.data() + total, data.size() - total);
+        if (n < 0) {
+            if (errno == EINTR)
+                continue;
+            ::close(fd);
+            throw std::runtime_error("Failed to read file for atomic read: " +
+                                     path.string());
+        }
+        if (n == 0)
+            break; // file shrank concurrently; stop at actual EOF
+        total += static_cast<size_t>(n);
+    }
+    data.resize(total);
+
+    ::close(fd);
+    return data;
 }
