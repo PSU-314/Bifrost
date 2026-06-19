@@ -7,6 +7,7 @@
 #include <iostream>
 #include <openssl/sha.h>
 #include <securebytes.hpp>
+#include <stdexcept>
 #include <string>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -42,7 +43,13 @@ void unlockBifrost() {
     unsigned char digest[SHA256_DIGEST_LENGTH];
     SHA256((unsigned char *)passwd.data(), passwd.size(), digest);
     encKey = Bytes(digest, digest + SHA256_DIGEST_LENGTH);
-    KeyStore::init(encKey);
+
+    try {
+        KeyStore::init(encKey);
+    } catch (const std::runtime_error &e) {
+        std::cerr << "Incorrect password! KeyStore Decryption failed"
+                  << std::endl;
+    }
 }
 
 int main(int argc, char **argv) {

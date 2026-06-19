@@ -133,14 +133,7 @@ void KeyStore::init(Bytes &encryptionKey) {
     _encryptionKey = SecureBytes(encryptionKey);
 
     if (fs::exists(Paths::keyfile())) {
-        try {
-            loadStore();
-        } catch (const std::runtime_error &e) {
-            std::cerr << "Failed to load existing key store due to wrong "
-                         "encryption key\n"
-                      << e.what() << std::endl;
-            exit(EXIT_FAILURE);
-        }
+        loadStore();
     }
 }
 
