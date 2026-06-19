@@ -1,4 +1,5 @@
 #include <HMAC-SHA1.hpp>
+#include <KeyStore.hpp>
 #include <TypeDefs.hpp>
 #include <boost/lexical_cast.hpp>
 #include <cstdint>
@@ -8,6 +9,8 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <openssl/sha.h>
+#include <securebytes.hpp>
 #include <string>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -19,25 +22,32 @@
 
 namespace fs = std::filesystem;
 
-const fs::path DATA_DIR = "~/.local/share/bifrost";
-const fs::path KEY_STORAGE = DATA_DIR / "totp.keys";
 const std::string SENTINEL_FLAG = "--in-terminal";
 
 void launchInTerminal(const std::string selfPath, int argc, char **argv) {
-    std::string innerCmd = "\"" + selfPath + "\" " + SENTINEL_FLAG;
+    std::string innerCmd = "bash -c '\"" + selfPath + "\" " + SENTINEL_FLAG;
     for (int i = 1; i < argc; i++)
         innerCmd += " \"" + std::string(argv[i]) + "\"";
-    execlp("terminator", "terminator", "-e", innerCmd.c_str(), (char *)nullptr);
+    innerCmd += " ; exec bash'";
+    execlp("terminator", "terminator", "-x", innerCmd.c_str(), (char *)nullptr);
     std::perror("Failed to exec terminal emulator");
     exit(EXIT_FAILURE);
 }
 
-void setupDirectories() {
-    if (!fs::exists(DATA_DIR)) {
-        fs::create_directories(DATA_DIR);
-        std::cout << "Created bifrost data directories" << std::endl;
-    }
-    std::cout << fs::exists(DATA_DIR) << std::endl;
+void unlockBifrost() {
+    Bytes encKey;
+    if (fs::exists(Paths::keyfile()))
+        std::cout << "Enter Bifrost password: ";
+    else
+        std::cout << "Setup Bifrost password: ";
+
+    std::string passwd;
+    std::cin >> passwd;
+
+    unsigned char digest[SHA256_DIGEST_LENGTH];
+    SHA256((unsigned char *)passwd.data(), passwd.size(), digest);
+    encKey = Bytes(digest, digest + SHA256_DIGEST_LENGTH);
+    KeyStore::init(encKey);
 }
 
 int main(int argc, char **argv) {
@@ -62,7 +72,25 @@ int main(int argc, char **argv) {
             launchInTerminal(selfPath, argc, argv);
         return EXIT_SUCCESS;
     }
-    setupDirectories();
+
+    Paths::init();
+    unlockBifrost();
+
+    std::cout << "\033[2J\033[1;1H" << std::flush;
+
+    std::cout << "Current Keys: " << std::endl;
+    auto keys = KeyStore::getAllKeys();
+    for (auto key : keys) {
+        std::cout << key->commonName << ": \n";
+        std::cout << "    fingerprint: ";
+        printBytes(std::cout, key->fingerprint);
+        std::cout << "\n    SANs: ";
+        for (auto s : key->sans)
+            std::cout << s << " ";
+        std::cout << std::endl;
+    }
+    std::cout << std::endl;
+
     Bytes totpKey;
     if (!fs::exists(TOTP_KEY_FILE) || argc > 1) {
         std::cout << "No existing secret found, starting new "

@@ -72,6 +72,7 @@ class KeyStore {
         static void store(Key &key);
         static const Key *lookup(const Bytes &fingerprint);
         static std::vector<const Key *> lookup(const std::string &cn);
+        static std::vector<const Key *> getAllKeys();
 
         static void erase(const Bytes &fingerprint);
         static Bytes serialize();

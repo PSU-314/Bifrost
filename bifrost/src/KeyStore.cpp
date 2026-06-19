@@ -1,9 +1,11 @@
-#include "securebytes.hpp"
-#include "utility.hpp"
 #include <KeyStore.hpp>
 #include <cassert>
 #include <cstdint>
+#include <cstdlib>
+#include <filesystem>
+#include <securebytes.hpp>
 #include <stdexcept>
+#include <utility.hpp>
 
 size_t Key::size() const {
     size_t s =
@@ -129,6 +131,17 @@ void KeyStore::init(Bytes &encryptionKey) {
            "Could not decrypt KeyStore: given key was of incorrect len");
 
     _encryptionKey = SecureBytes(encryptionKey);
+
+    if (fs::exists(Paths::keyfile())) {
+        try {
+            loadStore();
+        } catch (const std::runtime_error &e) {
+            std::cerr << "Failed to load existing key store due to wrong "
+                         "encryption key\n"
+                      << e.what() << std::endl;
+            exit(EXIT_FAILURE);
+        }
+    }
 }
 
 size_t KeyStore::size() {
@@ -209,6 +222,13 @@ std::vector<const Key *> KeyStore::lookup(const std::string &cn) {
             matches.push_back(&key);
     }
     return matches;
+}
+
+std::vector<const Key *> KeyStore::getAllKeys() {
+    std::vector<const Key *> keys;
+    for (const auto &[fp, key] : _store)
+        keys.push_back(&key);
+    return keys;
 }
 
 void KeyStore::erase(const Bytes &fingerprint) {
