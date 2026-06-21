@@ -1,39 +1,10 @@
-/**
- * client.cpp — mTLS client (mutual TLS — both sides authenticate)
- *
- * Changes from the previous version:
- *   1. Replaced SSL_CTX_set_default_verify_paths() with
- *      SSL_CTX_load_verify_locations() pointed at your root CA.
- *      The system CA bundle is irrelevant for a private PKI and would
- *      accept any publicly trusted cert as a valid server cert.
- *
- *   2. Added SSL_CTX_use_certificate_chain_file() +
- * SSL_CTX_use_PrivateKey_file() to load the client cert chain and key. The
- * chain file is client-chain.pem = client.crt + intermediate-ca.crt. Sending
- * only client.crt leaves the server unable to verify the issuer.
- *
- *   3. Added SSL_CTX_set_verify_depth(ctx, 2) — same reasoning as the server.
- *
- *   4. main() updated to connect to localhost:8443 and present the TOTP
- *      auth channel identity instead of example.com.
- *
- * Compile:
- *   g++ -std=c++17 client.cpp -o client -lssl -lcrypto
- *
- * Run:
- *   ./client
- *
- * File layout expected (relative to cwd):
- *
- *   client/client-chain.pem     (client.crt + intermediate-ca.crt concatenated)
- *   client/client.key
- */
-
-#include "securebytes.hpp"
+#include <limits>
 #include <openssl/crypto.h>
 #include <openssl/err.h>
+#include <openssl/prov_ssl.h>
 #include <openssl/ssl.h>
 #include <openssl/x509v3.h>
+#include <securebytes.hpp>
 
 #include <arpa/inet.h>
 #include <netdb.h>
@@ -51,51 +22,72 @@
 #include <tls.hpp>
 #include <utility.hpp>
 
-static Bytes exporterSecret;
-
 // ─── Exception helper
 // ─────────────────────────────────────────────────────────
 
 static void throw_ssl_error(const std::string &context) {
+    std::string msg = context;
+    unsigned long err;
+    bool first = true;
     char buf[256];
-    ERR_error_string_n(ERR_get_error(), buf, sizeof(buf));
-    throw std::runtime_error(context + ": " + buf);
+
+    while ((err = ERR_get_error()) != 0) {
+        ERR_error_string_n(err, buf, sizeof(buf));
+        msg += first ? ": " : " <- ";
+        msg += buf;
+        first = false;
+    }
+    if (first)
+        msg += ": (no OpenSSL error queue entry)";
+
+    throw std::runtime_error(msg);
 }
 
 static void setExporterSecret(const SSL *ssl, const char *line) {
     (void)ssl;
+    void *arg = SSL_get_app_data(ssl);
+    if (!arg)
+        return;
+    auto *cc = static_cast<ConnContext *>(arg);
 
     std::string s(line);
     auto first_sp = s.find(' ');
-    auto second_sp = s.find(' ', first_sp + 1);
-
-    if (first_sp == std::string::npos || second_sp == std::string::npos)
+    if (first_sp == std::string::npos)
         return;
-
     std::string label = s.substr(0, first_sp);
     if (label != "EXPORTER_SECRET")
         return;
+    auto second_sp = s.find(' ', first_sp + 1);
+    if (second_sp == std::string::npos)
+        return;
+
     std::string secret_hex = s.substr(second_sp + 1);
     if (secret_hex.size() % 2 != 0) {
         std::cerr << "[KeyLog] Malformed hex string (odd length)\n";
         return;
     }
 
-    exporterSecret.resize(secret_hex.size() / 2);
+    cc->exporterSecret.resize(secret_hex.size() / 2);
     for (size_t i = 0; i < secret_hex.size(); i += 2) {
-        char byte_str[3] = {secret_hex[i], secret_hex[i + 1], '\0'};
-        unsigned long byte_val = std::strtoul(byte_str, nullptr, 16);
-        exporterSecret[i / 2] = (Byte)byte_val;
+        int hi = hexNibble(secret_hex[i]);
+        int lo = hexNibble(secret_hex[i + 1]);
+        if (hi < 0 || lo < 0) {
+            std::cerr << "[KeyLog] Invalid hex character in exporter secret\n";
+            cc->exporterSecret.cleanse();
+            return;
+        }
+        cc->exporterSecret.data()[i / 2] = static_cast<Byte>((hi << 4) | lo);
     }
 }
 
 // ─── SSL_CTX factory
 // ──────────────────────────────────────────────────────────
 
-SSL_CTX *create_client_ctx(
-    const char *ca_cert,      //
-    const char *client_chain, // client/client-chain.pem  (leaf + intermediate)
-    const char *client_key)   // client/client.key
+SSL_CTX *
+create_client_ctx(const fs::path ca_cert,      //
+                  const fs::path client_chain, // client/client-chain.pem
+                                               // (leaf + intermediate)
+                  const fs::path client_key)   // client/client.key
 {
     SSL_CTX *ctx = SSL_CTX_new(TLS_client_method());
     if (!ctx)
@@ -105,7 +97,7 @@ SSL_CTX *create_client_ctx(
     if (SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION) != 1)
         throw_ssl_error("set_min_proto_version");
 
-    if (SSL_CTX_set_max_proto_version(ctx, 0) != 1)
+    if (SSL_CTX_set_max_proto_version(ctx, TLS1_3_VERSION) != 1)
         throw_ssl_error("set_max_proto_version");
 
     // ── Cipher suite pinning (TLS 1.2) ───────────────────────────────────────
@@ -128,7 +120,7 @@ SSL_CTX *create_client_ctx(
     // Point at your private root CA, NOT the system store.
     // Using set_default_verify_paths() would accept any cert signed by any
     // publicly trusted CA — an attacker with a Let's Encrypt cert could MITM.
-    if (SSL_CTX_load_verify_locations(ctx, ca_cert, nullptr) != 1)
+    if (SSL_CTX_load_verify_locations(ctx, ca_cert.c_str(), nullptr) != 1)
         throw_ssl_error("load_verify_locations (root CA)");
 
     SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, nullptr);
@@ -144,10 +136,11 @@ SSL_CTX *create_client_ctx(
     // the most common mTLS mistake — the server receives a leaf cert whose
     // issuer it cannot find, causing error 20 "unable to get local issuer
     // certificate".
-    if (SSL_CTX_use_certificate_chain_file(ctx, client_chain) != 1)
+    if (SSL_CTX_use_certificate_chain_file(ctx, client_chain.c_str()) != 1)
         throw_ssl_error("use_certificate_chain_file (client chain)");
 
-    if (SSL_CTX_use_PrivateKey_file(ctx, client_key, SSL_FILETYPE_PEM) != 1)
+    if (SSL_CTX_use_PrivateKey_file(ctx, client_key.c_str(),
+                                    SSL_FILETYPE_PEM) != 1)
         throw_ssl_error("use_PrivateKey_file (client key)");
 
     // Confirm the chain cert and key are a matched pair.
@@ -204,10 +197,13 @@ int connect_tcp(const std::string &host, uint16_t port) {
 // ─── TLS handshake + hostname verification
 // ────────────────────────────────────
 
-SSL *tls_connect(SSL_CTX *ctx, int tcp_fd, const std::string &hostname) {
+SSL *tls_connect(SSL_CTX *ctx, int tcp_fd, const std::string &hostname,
+                 ConnContext &connCtx) {
     SSL *ssl = SSL_new(ctx);
     if (!ssl)
         throw_ssl_error("SSL_new");
+
+    SSL_set_app_data(ssl, &connCtx);
 
     // SNI: send the hostname in ClientHello so the server selects the correct
     // certificate when hosting multiple names on one IP.
@@ -259,21 +255,37 @@ SSL *tls_connect(SSL_CTX *ctx, int tcp_fd, const std::string &hostname) {
 // ───────────────────────────────────────────────────────
 
 void tls_send(SSL *ssl, const void *data, size_t len) {
+    if (len > static_cast<size_t>(std::numeric_limits<int>::max()))
+        throw std::runtime_error(
+            "tls_send: payload exceeds SSL_write's int length limit");
+
     size_t sent = 0;
     while (sent < len) {
-        int n = SSL_write(ssl, static_cast<const char *>(data) + sent,
-                          static_cast<int>(len - sent));
-        if (n <= 0)
-            throw_ssl_error("SSL_write");
+        int chunk = static_cast<int>(std::min(
+            len - sent, static_cast<size_t>(std::numeric_limits<int>::max())));
+        int n = SSL_write(ssl, static_cast<const char *>(data) + sent, chunk);
+        if (n <= 0) {
+            int err = SSL_get_error(ssl, n);
+            throw_ssl_error("SSL_write failed : " + std::to_string(err));
+        }
         sent += static_cast<size_t>(n);
     }
 }
 
 std::string tls_recv(SSL *ssl, size_t max_bytes) {
+    if (max_bytes > static_cast<size_t>(std::numeric_limits<int>::max()))
+        throw std::runtime_error(
+            "tls_recv: max_bytes exceeds SSL_read's int length limit");
+
     std::string buf(max_bytes, '\0');
     int n = SSL_read(ssl, buf.data(), static_cast<int>(max_bytes));
-    if (n <= 0)
-        throw_ssl_error("SSL_read");
+    if (n <= 0) {
+        int err = SSL_get_error(ssl, n);
+        if (err == SSL_ERROR_ZERO_RETURN)
+            throw std::runtime_error(
+                "SSL_read: peer closed connection (close_notify received)");
+        throw_ssl_error("SSL_read failed : " + std::to_string(err));
+    }
     buf.resize(static_cast<size_t>(n));
     return buf;
 }
@@ -285,8 +297,14 @@ void tls_shutdown(SSL *ssl, int tcp_fd) {
     // Two-phase shutdown: send close_notify, wait for peer's close_notify.
     // Prevents truncation attacks where an attacker closes TCP early.
     int ret = SSL_shutdown(ssl);
-    if (ret == 0)
-        SSL_shutdown(ssl);
+    if (ret == 0) {
+        ret = SSL_shutdown(ssl);
+        if (ret < 0) {
+            int err = SSL_get_error(ssl, ret);
+            std::cerr << "TLS Shutdown incomplete. SSL error: " << err
+                      << std::endl;
+        }
+    }
 
     SSL_free(ssl);
     close(tcp_fd);
@@ -324,17 +342,14 @@ Bytes establishTOTPKey(std::string serverRegCode, size_t totpKeyLen) {
     SSL_CTX *ctx = nullptr;
     SSL *ssl = nullptr;
     int fd = -1;
+    ConnContext connCtx;
     Bytes totpKey;
 
     try {
-        ctx = create_client_ctx(CA_CERT, BIFROST_CERT_CHAIN, BIFROST_KEY);
+        ctx = create_client_ctx(Paths::rootCACert(), Paths::certChain(),
+                                Paths::privKey());
         fd = connect_tcp(SERVER_HOST, SERVER_PORT);
-        ssl = tls_connect(ctx, fd, SERVER_HOST);
-
-        std::cout << "Exporter Secret: " << std::hex << std::setfill('0');
-        for (auto x : exporterSecret)
-            std::cout << std::setw(2) << (int)x;
-        std::cout << std::dec << std::endl;
+        ssl = tls_connect(ctx, fd, SERVER_HOST, connCtx);
 
         Bytes pwKey = fetchPWKey(ssl, fd, serverRegCode);
 
@@ -342,7 +357,9 @@ Bytes establishTOTPKey(std::string serverRegCode, size_t totpKeyLen) {
         std::string infoStr = "bifrost-totp-key";
         Bytes info(infoStr.begin(), infoStr.end());
         SecureBytes secureTotpKey = SecureBytes(totpKey);
-        hkdf_sha256(exporterSecret, pwKey, info, totpKeyLen, secureTotpKey);
+        OPENSSL_cleanse(totpKey.data(), totpKey.size());
+        hkdf_sha256(connCtx.exporterSecret, pwKey, info, totpKeyLen,
+                    secureTotpKey);
 
         tls_shutdown(ssl, fd);
         ssl = nullptr;
@@ -354,7 +371,6 @@ Bytes establishTOTPKey(std::string serverRegCode, size_t totpKeyLen) {
             SSL_free(ssl);
         if (fd >= 0)
             close(fd);
-        SSL_CTX_free(ctx);
     }
 
     SSL_CTX_free(ctx);

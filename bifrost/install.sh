@@ -27,6 +27,7 @@ BUILD_TYPE="Release"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_BIN_DIR="$HOME/.local/bin"
 INSTALL_DESKTOP_DIR="$HOME/.local/share/applications"
+CONFIG_DIR="$HOME/.config/bifrost"
 
 echo "SCRIPT_DIR: $SCRIPT_DIR"
 
@@ -35,9 +36,10 @@ err()  { echo -e "\033[1;31m[error]\033[0m $*" >&2; }
 
 # ---- Uninstall path ----------------------------------------------------
 if [[ "${1:-}" == "--uninstall" ]]; then
-    log "Removing installed binary, desktop file, and protocol registration..."
+    log "Removing installed binary, desktop file, configs, and protocol registration..."
     rm -f "$INSTALL_BIN_DIR/$BINARY_NAME"
     rm -f "$INSTALL_DESKTOP_DIR/$DESKTOP_FILE_NAME"
+    rm -rf "$CONFIG_DIR"
     update-desktop-database "$INSTALL_DESKTOP_DIR" 2>/dev/null || true
     log "Uninstalled. (xdg-mime default association is left as-is; another app may need to claim the scheme.)"
     exit 0
@@ -81,6 +83,23 @@ fi
 log "Installing binary to $INSTALL_BIN_DIR ..."
 mkdir -p "$INSTALL_BIN_DIR"
 install -m 755 "$BUILT_BINARY" "$INSTALL_BIN_DIR/$BINARY_NAME"
+
+# ---- Install certificates ---------------------------------------------
+log "Installing certificates to $CONFIG_DIR/certs ..."
+
+install -d -m 744 "$CONFIG_DIR/certs"
+
+for cert in "$SCRIPT_DIR/certs/"*.crt "$SCRIPT_DIR/certs/"*.pem; do
+    if [[ -f "$cert" ]]; then
+        install -m 444 "$cert" "$CONFIG_DIR/certs/"
+    fi
+done
+
+for key in "$SCRIPT_DIR/certs/"*.key; do
+    if [[ -f "$key" ]]; then
+        install -m 400 "$key" "$CONFIG_DIR/certs/"
+    fi
+done
 
 # ---- Install desktop file (with path rewritten to the installed binary) ---
 log "Installing desktop file to $INSTALL_DESKTOP_DIR ..."

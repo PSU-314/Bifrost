@@ -18,6 +18,11 @@ using Bytes = std::vector<Byte>;
 
 #define DEFAULT_KEYFILE "totp-secrets.keys"
 #define APP_DIR_NAME "bifrost"
+#define CERTS_DIR_NAME "certs"
+
+#define ROOT_CA_CERT "root-ca.crt"
+#define BIFROST_CERT_CHAIN "bifrost-chain.pem"
+#define BIFROST_KEY "bifrost.key"
 
 class Paths {
     private:
@@ -35,8 +40,13 @@ class Paths {
     public:
         static void init() {
             auto cnfgdir = configDir();
+            auto crtdir = certsDir();
             if (!fs::exists(cnfgdir))
                 fs::create_directories(cnfgdir);
+            if (!fs::exists(crtdir) || !fs::exists(rootCACert()) ||
+                !fs::exists(certChain()) || !fs::exists(privKey()))
+                throw std::runtime_error("Missing Certs");
+
             _keyfile = DEFAULT_KEYFILE;
         }
 
@@ -66,4 +76,8 @@ class Paths {
 
         static void setKeyfile(const std::string &file) { _keyfile = file; }
         static fs::path keyfile() { return configDir() / _keyfile; }
+        static fs::path certsDir() { return configDir() / CERTS_DIR_NAME; }
+        static fs::path rootCACert() { return certsDir() / ROOT_CA_CERT; }
+        static fs::path certChain() { return certsDir() / BIFROST_CERT_CHAIN; }
+        static fs::path privKey() { return certsDir() / BIFROST_KEY; }
 };

@@ -10,7 +10,7 @@
 #include <utility.hpp>
 using namespace fs;
 
-constexpr int hex_char_to_int(char c) noexcept {
+int hexNibble(char c) noexcept {
     if (c >= '0' && c <= '9')
         return c - '0';
     if (c >= 'a' && c <= 'f')
@@ -49,8 +49,8 @@ Bytes hexToBytes(std::string_view hex) {
     bytes.reserve(hex.size() / 2);
 
     for (size_t i = 0; i < hex.size(); i += 2) {
-        int high_nibble = hex_char_to_int(hex[i]);
-        int low_nibble = hex_char_to_int(hex[i + 1]);
+        int high_nibble = hexNibble(hex[i]);
+        int low_nibble = hexNibble(hex[i + 1]);
 
         if (high_nibble == -1 || low_nibble == -1)
             throw std::runtime_error("Given hex string has invalid characters");

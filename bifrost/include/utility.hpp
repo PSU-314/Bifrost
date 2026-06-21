@@ -13,6 +13,7 @@ struct BytesHash {
         }
 };
 
+int hexNibble(char c) noexcept;
 void printBytes(std::ostream &stream, const Bytes &bytes, bool shorten = true);
 Bytes hexToBytes(std::string_view hex);
 std::string bytesToHex(const Bytes &bytes);

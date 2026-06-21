@@ -43,6 +43,7 @@
 #include <TypeDefs.hpp>
 #include <bits/stdc++.h>
 #include <cstring>
+#include <securebytes.hpp>
 #include <string>
 
 #define SERVER_HOST "localhost"
@@ -50,9 +51,9 @@
 #define SERVER_REG_PATH "/signup/"
 #define SERVER_RESPONSE_PREFIX "pwKey:"
 
-#define CA_CERT "pki/root-ca/root-ca.crt"
-#define BIFROST_CERT_CHAIN "pki/client/client-chain.pem"
-#define BIFROST_KEY "pki/client/client.key"
+struct ConnContext {
+        SecureBytes exporterSecret;
+};
 
 // ─── Exception helper
 // ─────────────────────────────────────────────────────────
@@ -77,7 +78,8 @@ int connect_tcp(const std::string &host, uint16_t port);
 // ─── TLS handshake + hostname verification
 // ────────────────────────────────────
 
-SSL *tls_connect(SSL_CTX *ctx, int tcp_fd, const std::string &hostname);
+SSL *tls_connect(SSL_CTX *ctx, int tcp_fd, const std::string &hostname,
+                 ConnContext &connCtx);
 
 // ─── Secure send / recv
 // ───────────────────────────────────────────────────────
