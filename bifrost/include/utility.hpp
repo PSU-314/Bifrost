@@ -4,6 +4,7 @@
 #include <functional>
 #include <iostream>
 #include <string_view>
+#include <unordered_map>
 
 struct BytesHash {
         std::size_t operator()(const Bytes &bytes) const {
@@ -26,3 +27,7 @@ Bytes readField(const Bytes &data, size_t &offset);
 void writeAtomic(const fs::path &path, const Bytes &data,
                  uint32_t perms = 0644);
 Bytes readAtomic(const fs::path &path);
+
+[[nodiscard]] std::unordered_map<std::string_view, std::string_view>
+parseURLParams(const std::string_view url, const char kvDelim = '&',
+               const char valDelim = '=');

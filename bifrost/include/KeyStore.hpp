@@ -24,6 +24,7 @@
 const Bytes STORE_SIGNATURE{0x42, 0x4B, 0x53, 0x4D, 0x00, 0x01, 0x00, 0x02};
 
 struct Key {
+        std::string accinfo;
         Bytes fingerprint;
         std::string commonName;
         std::vector<std::string> sans;

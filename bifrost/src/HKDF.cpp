@@ -5,8 +5,8 @@
 #include <openssl/kdf.h>
 #include <openssl/params.h>
 
-void hkdf_sha256(const SecureBytes &ikm, const Bytes &salt, const Bytes &info,
-                 size_t outLen, SecureBytes &okm) {
+void hkdf_sha256(const SecureBytes &ikm, const SecureBytes &salt,
+                 const Bytes &info, size_t outLen, SecureBytes &okm) {
     okm.resize(outLen);
 
     EVP_KDF *kdf = EVP_KDF_fetch(nullptr, "HKDF", nullptr);

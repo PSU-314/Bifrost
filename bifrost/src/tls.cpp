@@ -1,3 +1,4 @@
+#include <cstdint>
 #include <limits>
 #include <openssl/crypto.h>
 #include <openssl/err.h>
@@ -5,6 +6,7 @@
 #include <openssl/ssl.h>
 #include <openssl/x509v3.h>
 #include <securebytes.hpp>
+#include <totp.hpp>
 
 #include <arpa/inet.h>
 #include <netdb.h>
@@ -13,8 +15,8 @@
 #include <unistd.h>
 
 #include <HKDF.hpp>
+#include <KeyStore.hpp>
 #include <TypeDefs.hpp>
-#include <bits/stdc++.h>
 #include <cstring>
 #include <iostream>
 #include <stdexcept>
@@ -312,30 +314,46 @@ void tls_shutdown(SSL *ssl, int tcp_fd) {
 
 // ─── main
 // ─────────────────────────────────────────────────────────────────────
-Bytes fetchPWKey(SSL *ssl, int tcp_fd, std::string serverRegCode) {
-    std::string request = "GET " SERVER_REG_PATH + serverRegCode +
-                          " HTTP/1.1\r\n"
-                          "Host: " +
-                          SERVER_HOST +
-                          "\r\n"
-                          "Connection: close\r\n\r\n";
+ServerRegData fetchServerRegData(SSL *ssl, int tcp_fd, const std::string host) {
     std::stringstream requestStream;
-    requestStream << "GET " << SERVER_REG_PATH << serverRegCode
-                  << " HTTP/1.1\r\n";
-    requestStream << "Host: " << SERVER_HOST << "\r\n";
+    requestStream << "GET " << host << " HTTP/1.1\r\n";
+    requestStream << "Host: " << host << "\r\n";
     requestStream << "Connection: close\r\n\r\n";
+    auto request = requestStream.str();
 
     tls_send(ssl, request.c_str(), request.length());
     std::string resp = tls_recv(ssl);
-    if (!resp.starts_with(SERVER_RESPONSE_PREFIX)) {
+    auto params = parseURLParams(resp, '&', '=');
+    if (!params.contains("PW_KEY") || !params.contains("ACC_INFO")) {
         tls_shutdown(ssl, tcp_fd);
-        throw std::runtime_error("Server response had invalid prefix");
+        throw std::runtime_error("Server response had missing fields");
     }
-    return hexToBytes(
-        resp.substr(std::string_view(SERVER_RESPONSE_PREFIX).size()));
+
+    auto pwkey_bytes = hexToBytes(params["PW_KEY"]);
+    SecureBytes pwkey(pwkey_bytes);
+    OPENSSL_cleanse(pwkey_bytes.data(), pwkey_bytes.size());
+    return {pwkey.clone(), std::string(params["ACC_INFO"])};
 }
 
-Bytes establishTOTPKey(std::string serverRegCode, size_t totpKeyLen) {
+ConnInfo getConnInfo(const std::string_view &serverArgs) {
+    if (!serverArgs.starts_with(BIFROST_PROTOCOL))
+        throw std::runtime_error("Trying to connect with an invalid protocol");
+
+    std::string_view urlParams = serverArgs.substr(BIFROST_PROTOCOL.size());
+    auto params = parseURLParams(urlParams);
+    if (!params.contains("host") || !params.contains("port"))
+        throw std::runtime_error("Given URL for registration does not contain "
+                                 "required connection information");
+
+    std::string host(params["host"]), portstr(params["port"]);
+    auto port_ull = std::stoull(portstr, nullptr, 10);
+    if (port_ull > UINT16_MAX)
+        throw std::runtime_error("Given URL for registration does not contain "
+                                 "a valid port for connection");
+    return {std::string(params["host"]), static_cast<uint16_t>(port_ull)};
+}
+
+Key registerBifrost(const ConnInfo &connInfo) {
     SSL_load_error_strings();
     OpenSSL_add_ssl_algorithms();
 
@@ -343,23 +361,25 @@ Bytes establishTOTPKey(std::string serverRegCode, size_t totpKeyLen) {
     SSL *ssl = nullptr;
     int fd = -1;
     ConnContext connCtx;
-    Bytes totpKey;
+    ServerRegData regData;
+    SecureBytes totpKey;
+    Key newKey;
 
     try {
         ctx = create_client_ctx(Paths::rootCACert(), Paths::certChain(),
                                 Paths::privKey());
-        fd = connect_tcp(SERVER_HOST, SERVER_PORT);
-        ssl = tls_connect(ctx, fd, SERVER_HOST, connCtx);
+        fd = connect_tcp(connInfo.host, connInfo.port);
+        ssl = tls_connect(ctx, fd, connInfo.host, connCtx);
 
-        Bytes pwKey = fetchPWKey(ssl, fd, serverRegCode);
+        regData = fetchServerRegData(ssl, fd, connInfo.host);
+        auto cert = SSL_get0_peer_certificate(ssl);
+
+        newKey = KeyStore::buildKey(cert);
+        newKey.accinfo = regData.ACC_INFO;
 
         // Perform HKDF
-        std::string infoStr = "bifrost-totp-key";
-        Bytes info(infoStr.begin(), infoStr.end());
-        SecureBytes secureTotpKey = SecureBytes(totpKey);
-        OPENSSL_cleanse(totpKey.data(), totpKey.size());
-        hkdf_sha256(connCtx.exporterSecret, pwKey, info, totpKeyLen,
-                    secureTotpKey);
+        hkdf_sha256(connCtx.exporterSecret, regData.KEY, TOTP_HKDF_INFO,
+                    TOTP_KEY_LEN, newKey.secret);
 
         tls_shutdown(ssl, fd);
         ssl = nullptr;
@@ -371,8 +391,10 @@ Bytes establishTOTPKey(std::string serverRegCode, size_t totpKeyLen) {
             SSL_free(ssl);
         if (fd >= 0)
             close(fd);
+        SSL_CTX_free(ctx);
+        throw std::runtime_error("Could not register bifrost with server");
     }
 
     SSL_CTX_free(ctx);
-    return totpKey;
+    return newKey;
 }

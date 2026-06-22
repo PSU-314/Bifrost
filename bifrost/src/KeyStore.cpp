@@ -3,7 +3,6 @@
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
-#include <memory>
 #include <openssl/crypto.h>
 #include <openssl/evp.h>
 #include <securebytes.hpp>
@@ -11,8 +10,8 @@
 #include <utility.hpp>
 
 size_t Key::size() const {
-    size_t s =
-        4 + fingerprint.size() + 4 + commonName.size() + 4 + secret.size() + 4;
+    size_t s = 4 + accinfo.size() + 4 + fingerprint.size() + 4 +
+               commonName.size() + 4 + secret.size() + 4;
     for (const auto &san : sans)
         s += 4 + san.size();
     return s;
@@ -21,6 +20,9 @@ size_t Key::size() const {
 Bytes Key::serialize() const {
     Bytes data;
     data.reserve(size());
+
+    writeu32(data, static_cast<uint32_t>(accinfo.size()));
+    data.insert(data.end(), accinfo.begin(), accinfo.end());
 
     writeu32(data, static_cast<uint32_t>(fingerprint.size()));
     data.insert(data.end(), fingerprint.begin(), fingerprint.end());
@@ -44,6 +46,8 @@ Key Key::deserialize(const Bytes &data) {
     size_t offset = 0;
     Key key;
 
+    Bytes accinfo = readField(data, offset);
+    key.accinfo.assign(accinfo.begin(), accinfo.end());
     key.fingerprint = readField(data, offset);
     Bytes cn = readField(data, offset);
     key.commonName.assign(cn.begin(), cn.end());

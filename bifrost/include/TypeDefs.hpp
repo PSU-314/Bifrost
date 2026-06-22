@@ -24,6 +24,8 @@ using Bytes = std::vector<Byte>;
 #define BIFROST_CERT_CHAIN "bifrost-chain.pem"
 #define BIFROST_KEY "bifrost.key"
 
+constexpr std::string BIFROST_PROTOCOL = "bifrost-totp://";
+
 class Paths {
     private:
         inline static std::string _keyfile;

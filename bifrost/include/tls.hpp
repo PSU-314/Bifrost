@@ -1,34 +1,3 @@
-/**
- * client.cpp — mTLS client (mutual TLS — both sides authenticate)
- *
- * Changes from the previous version:
- *   1. Replaced SSL_CTX_set_default_verify_paths() with
- *      SSL_CTX_load_verify_locations() pointed at your root CA.
- *      The system CA bundle is irrelevant for a private PKI and would
- *      accept any publicly trusted cert as a valid server cert.
- *
- *   2. Added SSL_CTX_use_certificate_chain_file() +
- * SSL_CTX_use_PrivateKey_file() to load the client cert chain and key. The
- * chain file is client-chain.pem = client.crt + intermediate-ca.crt. Sending
- * only client.crt leaves the server unable to verify the issuer.
- *
- *   3. Added SSL_CTX_set_verify_depth(ctx, 2) — same reasoning as the server.
- *
- *   4. main() updated to connect to localhost:8443 and present the TOTP
- *      auth channel identity instead of example.com.
- *
- * Compile:
- *   g++ -std=c++17 client.cpp -o client -lssl -lcrypto
- *
- * Run:
- *   ./client
- *
- * File layout expected (relative to cwd):
- *
- *   client/client-chain.pem     (client.crt + intermediate-ca.crt concatenated)
- *   client/client.key
- */
-
 #include <openssl/crypto.h>
 #include <openssl/err.h>
 #include <openssl/ssl.h>
@@ -40,19 +9,29 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <KeyStore.hpp>
 #include <TypeDefs.hpp>
 #include <bits/stdc++.h>
 #include <cstring>
 #include <securebytes.hpp>
 #include <string>
 
-#define SERVER_HOST "localhost"
-#define SERVER_PORT 8443
-#define SERVER_REG_PATH "/signup/"
-#define SERVER_RESPONSE_PREFIX "pwKey:"
+constexpr char TOTP_HKDF_INFO_[]{"bifrost-totp-key"};
+const Bytes TOTP_HKDF_INFO(TOTP_HKDF_INFO_,
+                           TOTP_HKDF_INFO_ + sizeof(TOTP_HKDF_INFO_));
 
 struct ConnContext {
         SecureBytes exporterSecret;
+};
+
+struct ConnInfo {
+        std::string host;
+        uint16_t port;
+};
+
+struct ServerRegData {
+        SecureBytes KEY;
+        std::string ACC_INFO;
 };
 
 // ─── Exception helper
@@ -95,5 +74,8 @@ void tls_shutdown(SSL *ssl, int tcp_fd);
 
 // ─── main
 // ─────────────────────────────────────────────────────────────────────
+ServerRegData fetchServerRegData(SSL *ssl, int tcp_fd, const std::string host);
 
-Bytes establishTOTPKey(std::string serverRegCode, size_t totpKeyLen);
+ConnInfo getConnInfo(const std::string_view &serverArgs);
+
+Key registerBifrost(const ConnInfo &connInfo);

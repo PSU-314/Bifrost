@@ -5,8 +5,10 @@
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
+#include <string_view>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <unordered_map>
 #include <utility.hpp>
 using namespace fs;
 
@@ -178,4 +180,28 @@ Bytes readAtomic(const fs::path &path) {
 
     ::close(fd);
     return data;
+}
+
+[[nodiscard]] std::unordered_map<std::string_view, std::string_view>
+parseURLParams(const std::string_view url, const char kvDelim,
+               const char valDelim) {
+    std::unordered_map<std::string_view, std::string_view> params;
+    size_t pos = 0;
+    const size_t size = url.size();
+
+    while (pos < size) {
+        size_t nextPair = url.find(kvDelim, pos);
+        if (nextPair == std::string_view::npos)
+            nextPair = size;
+
+        std::string_view segment = url.substr(pos, nextPair - pos);
+        size_t eqPos = segment.find(valDelim);
+        if (eqPos != std::string_view::npos)
+            params[segment.substr(0, eqPos)] = segment.substr(eqPos + 1);
+        else if (!segment.empty())
+            params[segment] = {};
+
+        pos = nextPair + 1;
+    }
+    return params;
 }

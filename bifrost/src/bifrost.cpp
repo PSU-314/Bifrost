@@ -4,7 +4,9 @@
 #include <cstdlib>
 #include <fcntl.h>
 #include <filesystem>
+#include <ios>
 #include <iostream>
+#include <limits>
 #include <openssl/sha.h>
 #include <securebytes.hpp>
 #include <stdexcept>
@@ -84,6 +86,34 @@ int main(int argc, char **argv) {
 
     Paths::init();
     unlockBifrost();
+    std::cout << "\n";
+
+    // Bytes fg = hexToBytes(
+    //     "1d5b3b8ab3ef69cc680d105be88aec702125b7eba47e58ac630e2277b35be03a");
+    // Key k;
+    // k.accinfo = "ntronyx";
+    // k.fingerprint = fg;
+    // k.commonName = "test2";
+    // k.sans.push_back("san3");
+    // k.sans.push_back("san4");
+    // k.secret = SecureBytes(hexToBytes("a615e4c7ab8ac4530ff1160f138c881b"));
+    // KeyStore::store(k);
+    // KeyStore::saveStore();
+    // return 0;
+
+    if (argc > 2) {
+        ConnInfo connInfo = getConnInfo(argv[2]);
+        std::cout << "Connecting to\nHost: " << connInfo.host
+                  << "\nPort: " << connInfo.port << "\n"
+                  << std::endl;
+        auto key = registerBifrost(connInfo);
+        KeyStore::store(key);
+        KeyStore::saveStore();
+        std::cout << "\n\n Press Enter to continue...";
+        std::cin.clear();
+        std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+        std::cin.get();
+    }
 
     auto keys = KeyStore::getAllKeys();
 
@@ -91,7 +121,8 @@ int main(int argc, char **argv) {
         std::cout << "\033[2J\033[1;1H" << std::flush;
         std::cout << "Current Keys: " << std::endl;
         for (auto key : keys) {
-            std::cout << key->commonName << ": \n";
+            std::cout << "Account: " << key->accinfo << "\n";
+            std::cout << "    Server CN: " << key->commonName << "\n";
             std::cout << "    fingerprint: ";
             printBytes(std::cout, key->fingerprint);
             std::cout << "\n    SANs: ";
@@ -107,16 +138,4 @@ int main(int argc, char **argv) {
         std::cout << std::endl;
         usleep(500000);
     }
-
-    // Bytes fg = hexToBytes(
-    //     "1d5b3b8ab3ef69cc680d105be88aec702125b7eba47e58ac630e2277b35be03a");
-    // Key k;
-    // k.fingerprint = fg;
-    // k.commonName = "test2";
-    // k.sans.push_back("san3");
-    // k.sans.push_back("san4");
-    // k.secret = SecureBytes(hexToBytes("a615e4c7ab8ac4530ff1160f138c881b"));
-    // KeyStore::store(k);
-    // KeyStore::saveStore();
-    // return 0;
 }
