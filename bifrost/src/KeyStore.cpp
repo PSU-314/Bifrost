@@ -1,3 +1,4 @@
+#include "bifrost.hpp"
 #include <KeyStore.hpp>
 #include <cassert>
 #include <cstdint>
@@ -100,7 +101,8 @@ Bytes EncryptedBlob::serialize() const {
 
 EncryptedBlob EncryptedBlob::deserialize(const Bytes &data) {
     EncryptedBlob blob;
-    constexpr size_t headerSize = 1 + ENC_BLOB_NONCE_SIZE + 4 + ENC_BLOB_TAG_SIZE;
+    constexpr size_t headerSize =
+        1 + ENC_BLOB_NONCE_SIZE + 4 + ENC_BLOB_TAG_SIZE;
 
     if (data.empty())
         throw std::runtime_error("Could not deserialize blob: empty data");
@@ -111,7 +113,8 @@ EncryptedBlob EncryptedBlob::deserialize(const Bytes &data) {
     if (data.size() < headerSize)
         throw std::runtime_error("Could not deserialize blob");
 
-    blob.nonce = Bytes(data.begin() + 1, data.begin() + 1 + ENC_BLOB_NONCE_SIZE);
+    blob.nonce =
+        Bytes(data.begin() + 1, data.begin() + 1 + ENC_BLOB_NONCE_SIZE);
     uint32_t cipherSize = readu32(data.data() + 1 + ENC_BLOB_NONCE_SIZE);
 
     if (cipherSize > data.size() - headerSize)
@@ -214,24 +217,66 @@ Key KeyStore::buildKey(X509 *cert) {
     return key;
 }
 
-void KeyStore::store(X509 *cert, SecureBytes &&secret) {
+void KeyStore::store(X509 *cert, const std::string &accinfo,
+                     SecureBytes &&secret) {
     Key key = buildKey(cert);
     key.secret = std::move(secret);
+    key.accinfo = accinfo;
     OPENSSL_cleanse(secret.data(), secret.size());
-    _store[key.fingerprint] = std::move(key);
+    Bytes ukid = getUKID(key);
+    _store[ukid] = std::move(key);
 }
 
-void KeyStore::store(Key &key) { _store[key.fingerprint] = std::move(key); }
-
-const Key *KeyStore::lookup(const Bytes &fingerprint) {
-    auto it = _store.find(fingerprint);
-    return it != _store.end() ? &it->second : nullptr;
+void KeyStore::store(Key &key) {
+    Bytes ukid = getUKID(key);
+    _store[ukid] = std::move(key);
 }
 
-std::vector<const Key *> KeyStore::lookup(const std::string &cn) {
+Bytes KeyStore::getUKID(const Key &key) {
+    unsigned char digest[EVP_MAX_MD_SIZE];
+    unsigned int digestLen = 0;
+    EVP_MD_CTX *mdctx = EVP_MD_CTX_new();
+    if (!mdctx || EVP_DigestInit_ex(mdctx, EVP_sha256(), nullptr) != 1 ||
+        EVP_DigestUpdate(mdctx, key.accinfo.c_str(), key.accinfo.size()) != 1 ||
+        EVP_DigestUpdate(mdctx, key.fingerprint.data(),
+                         key.fingerprint.size()) != 1 ||
+        EVP_DigestFinal_ex(mdctx, digest, &digestLen) != 1) {
+        if (mdctx)
+            EVP_MD_CTX_free(mdctx);
+        throw std::runtime_error("Failed to compute UKID");
+    }
+    EVP_MD_CTX_free(mdctx);
+    return Bytes(digest, digest + digestLen);
+}
+
+const Key *KeyStore::lookupByUKID(const Bytes &UKID) {
+    auto itr = _store.find(UKID);
+    return itr != _store.end() ? &itr->second : nullptr;
+}
+
+std::vector<const Key *> KeyStore::lookupByFG(const Bytes &fingerprint) {
+    std::vector<const Key *> matches;
+    for (auto &[ukid, key] : _store) {
+        if (CRYPTO_memcmp(key.fingerprint.data(), fingerprint.data(),
+                          fingerprint.size()) == 0)
+            matches.push_back(&key);
+    }
+    return matches;
+}
+
+std::vector<const Key *> KeyStore::lookupByCN(const std::string &cn) {
     std::vector<const Key *> matches;
     for (auto &[fp, key] : _store) {
         if (key.commonName == cn)
+            matches.push_back(&key);
+    }
+    return matches;
+}
+
+std::vector<const Key *> KeyStore::lookupByAccInfo(const std::string &accinfo) {
+    std::vector<const Key *> matches;
+    for (auto &[fp, key] : _store) {
+        if (key.accinfo == accinfo)
             matches.push_back(&key);
     }
     return matches;
@@ -244,8 +289,8 @@ std::vector<const Key *> KeyStore::getAllKeys() {
     return keys;
 }
 
-void KeyStore::erase(const Bytes &fingerprint) {
-    auto it = _store.find(fingerprint);
+void KeyStore::erase(const Bytes &UKID) {
+    auto it = _store.find(UKID);
     if (it != _store.end())
         _store.erase(it);
 }

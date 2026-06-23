@@ -1,7 +1,7 @@
 #pragma once
 
-#include <bifrost.hpp>
 #include <assert.h>
+#include <bifrost.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -67,13 +67,20 @@ class KeyStore {
         static std::vector<std::string> extractSANs(X509 *cert);
         static Key buildKey(X509 *cert);
 
-        static void store(X509 *cert, SecureBytes &&secret);
+        static void store(X509 *cert, const std::string &accinfo,
+                          SecureBytes &&secret);
         static void store(Key &key);
-        static const Key *lookup(const Bytes &fingerprint);
-        static std::vector<const Key *> lookup(const std::string &cn);
+
+        static Bytes getUKID(const Key &key);
+        static const Key *lookupByUKID(const Bytes &UKID);
+        static std::vector<const Key *> lookupByFG(const Bytes &fingerprint);
+        static std::vector<const Key *> lookupByCN(const std::string &cn);
+        static std::vector<const Key *>
+        lookupByAccInfo(const std::string &accinfo);
+
         static std::vector<const Key *> getAllKeys();
 
-        static void erase(const Bytes &fingerprint);
+        static void erase(const Bytes &UKID);
         static Bytes serialize();
         static void deserialize(const Bytes &data);
         static EncryptedBlob encryptStore();
