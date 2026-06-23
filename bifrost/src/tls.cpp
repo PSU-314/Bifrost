@@ -16,7 +16,7 @@
 
 #include <HKDF.hpp>
 #include <KeyStore.hpp>
-#include <TypeDefs.hpp>
+#include <bifrost.hpp>
 #include <cstring>
 #include <iostream>
 #include <stdexcept>

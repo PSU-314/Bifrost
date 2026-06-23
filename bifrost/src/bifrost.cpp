@@ -1,5 +1,5 @@
 #include <KeyStore.hpp>
-#include <TypeDefs.hpp>
+#include <bifrost.hpp>
 #include <cstdio>
 #include <cstdlib>
 #include <fcntl.h>

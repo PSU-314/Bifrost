@@ -10,7 +10,7 @@
 #include <unistd.h>
 
 #include <KeyStore.hpp>
-#include <TypeDefs.hpp>
+#include <bifrost.hpp>
 #include <bits/stdc++.h>
 #include <cstring>
 #include <securebytes.hpp>

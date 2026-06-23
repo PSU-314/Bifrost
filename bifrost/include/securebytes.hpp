@@ -1,6 +1,6 @@
 #pragma once
 
-#include <TypeDefs.hpp>
+#include <bifrost.hpp>
 #include <cstddef>
 #include <memory>
 #include <openssl/crypto.h>

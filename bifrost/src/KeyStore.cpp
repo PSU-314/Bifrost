@@ -100,7 +100,7 @@ Bytes EncryptedBlob::serialize() const {
 
 EncryptedBlob EncryptedBlob::deserialize(const Bytes &data) {
     EncryptedBlob blob;
-    constexpr size_t headerSize = 1 + BLOB_NONCE_SIZE + 4 + BLOB_TAG_SIZE;
+    constexpr size_t headerSize = 1 + ENC_BLOB_NONCE_SIZE + 4 + ENC_BLOB_TAG_SIZE;
 
     if (data.empty())
         throw std::runtime_error("Could not deserialize blob: empty data");
@@ -111,8 +111,8 @@ EncryptedBlob EncryptedBlob::deserialize(const Bytes &data) {
     if (data.size() < headerSize)
         throw std::runtime_error("Could not deserialize blob");
 
-    blob.nonce = Bytes(data.begin() + 1, data.begin() + 1 + BLOB_NONCE_SIZE);
-    uint32_t cipherSize = readu32(data.data() + 1 + BLOB_NONCE_SIZE);
+    blob.nonce = Bytes(data.begin() + 1, data.begin() + 1 + ENC_BLOB_NONCE_SIZE);
+    uint32_t cipherSize = readu32(data.data() + 1 + ENC_BLOB_NONCE_SIZE);
 
     if (cipherSize > data.size() - headerSize)
         throw std::runtime_error("cipherSize exceeds available buffer");
@@ -120,7 +120,7 @@ EncryptedBlob EncryptedBlob::deserialize(const Bytes &data) {
         throw std::runtime_error(
             "Could not deserialize blob: cipherSize exceeds available buffer");
 
-    auto cipherStart = data.begin() + 1 + BLOB_NONCE_SIZE + 4;
+    auto cipherStart = data.begin() + 1 + ENC_BLOB_NONCE_SIZE + 4;
     blob.ciphertext = Bytes(cipherStart, cipherStart + cipherSize);
     blob.tag = Bytes(cipherStart + cipherSize, data.end());
 
@@ -293,8 +293,8 @@ void KeyStore::deserialize(const Bytes &data) {
 
 EncryptedBlob KeyStore::encryptStore() {
     EncryptedBlob blob;
-    blob.nonce.resize(BLOB_NONCE_SIZE);
-    if (RAND_bytes(blob.nonce.data(), BLOB_NONCE_SIZE) != 1)
+    blob.nonce.resize(ENC_BLOB_NONCE_SIZE);
+    if (RAND_bytes(blob.nonce.data(), ENC_BLOB_NONCE_SIZE) != 1)
         throw std::runtime_error("RAND_bytes failed to generate nonce");
 
     EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
@@ -304,11 +304,11 @@ EncryptedBlob KeyStore::encryptStore() {
         throw std::runtime_error("EVP_EncryptInit_ex failed");
     }
 
-    blob.ciphertext.resize(STORE_SIGNATURE.size() + size());
+    blob.ciphertext.resize(KEY_STORE_SIGNATURE.size() + size());
     Bytes plaintext, storeSerial = serialize();
-    plaintext.reserve(STORE_SIGNATURE.size() + size());
-    plaintext.insert(plaintext.end(), STORE_SIGNATURE.begin(),
-                     STORE_SIGNATURE.end());
+    plaintext.reserve(KEY_STORE_SIGNATURE.size() + size());
+    plaintext.insert(plaintext.end(), KEY_STORE_SIGNATURE.begin(),
+                     KEY_STORE_SIGNATURE.end());
     plaintext.insert(plaintext.end(), storeSerial.begin(), storeSerial.end());
 
     int outlen, finallen;
@@ -323,8 +323,8 @@ EncryptedBlob KeyStore::encryptStore() {
         throw std::runtime_error("EVP_EncryptInit_ex failed");
     }
 
-    blob.tag.resize(BLOB_TAG_SIZE);
-    if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_GET_TAG, BLOB_TAG_SIZE,
+    blob.tag.resize(ENC_BLOB_TAG_SIZE);
+    if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_GET_TAG, ENC_BLOB_TAG_SIZE,
                             blob.tag.data()) != 1) {
         EVP_CIPHER_CTX_free(ctx);
         throw std::runtime_error("EVP_EncryptInit_ex failed");
@@ -335,9 +335,9 @@ EncryptedBlob KeyStore::encryptStore() {
 }
 
 void KeyStore::decryptStore(const EncryptedBlob &blob) {
-    if (blob.nonce.size() != BLOB_NONCE_SIZE)
+    if (blob.nonce.size() != ENC_BLOB_NONCE_SIZE)
         throw std::runtime_error("Invalid nonce size in encrypted blob");
-    if (blob.tag.size() != BLOB_TAG_SIZE)
+    if (blob.tag.size() != ENC_BLOB_TAG_SIZE)
         throw std::runtime_error("Invalid tag size in encrypted blob");
 
     EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
@@ -379,15 +379,15 @@ void KeyStore::decryptStore(const EncryptedBlob &blob) {
 
     plaintext.resize(outlen + finallen);
 
-    if (plaintext.size() < STORE_SIGNATURE.size() ||
-        CRYPTO_memcmp(plaintext.data(), STORE_SIGNATURE.data(),
-                      STORE_SIGNATURE.size()) != 0) {
+    if (plaintext.size() < KEY_STORE_SIGNATURE.size() ||
+        CRYPTO_memcmp(plaintext.data(), KEY_STORE_SIGNATURE.data(),
+                      KEY_STORE_SIGNATURE.size()) != 0) {
         OPENSSL_cleanse(plaintext.data(), plaintext.size());
         throw std::runtime_error(
             "Decrypted data missing expected store signature");
     }
 
-    Bytes serialized(plaintext.begin() + STORE_SIGNATURE.size(),
+    Bytes serialized(plaintext.begin() + KEY_STORE_SIGNATURE.size(),
                      plaintext.end());
 
     OPENSSL_cleanse(plaintext.data(), plaintext.size());

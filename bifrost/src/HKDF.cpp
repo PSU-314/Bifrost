@@ -1,5 +1,5 @@
 #include <HKDF.hpp>
-#include <TypeDefs.hpp>
+#include <bifrost.hpp>
 #include <openssl/core_names.h>
 #include <openssl/evp.h>
 #include <openssl/kdf.h>

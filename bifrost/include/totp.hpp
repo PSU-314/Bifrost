@@ -1,5 +1,5 @@
 #pragma once
-#include <TypeDefs.hpp>
+#include <bifrost.hpp>
 #include <securebytes.hpp>
 #include <utility.hpp>
 

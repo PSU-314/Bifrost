@@ -1,6 +1,6 @@
 #pragma once
 
-#include <TypeDefs.hpp>
+#include <bifrost.hpp>
 #include <assert.h>
 #include <cstddef>
 #include <cstdint>
@@ -19,9 +19,9 @@
 #include <vector>
 
 #define KEY_STORE_ENC_KEY_SIZE 32
-#define BLOB_NONCE_SIZE 12
-#define BLOB_TAG_SIZE 16
-const Bytes STORE_SIGNATURE{0x42, 0x4B, 0x53, 0x4D, 0x00, 0x01, 0x00, 0x02};
+#define ENC_BLOB_NONCE_SIZE 12
+#define ENC_BLOB_TAG_SIZE 16
+const Bytes KEY_STORE_SIGNATURE{0x42, 0x4B, 0x53, 0x4D, 0x00, 0x01, 0x00, 0x02};
 
 struct Key {
         std::string accinfo;
