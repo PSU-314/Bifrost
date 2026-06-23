@@ -24,8 +24,7 @@
 #include <tls.hpp>
 #include <utility.hpp>
 
-// ─── Exception helper
-// ─────────────────────────────────────────────────────────
+// ─── Exception helper ─────────────────────────────────────────────────────────
 
 static void throw_ssl_error(const std::string &context) {
     std::string msg = context;
@@ -45,51 +44,12 @@ static void throw_ssl_error(const std::string &context) {
     throw std::runtime_error(msg);
 }
 
-static void setExporterSecret(const SSL *ssl, const char *line) {
-    (void)ssl;
-    void *arg = SSL_get_app_data(ssl);
-    if (!arg)
-        return;
-    auto *cc = static_cast<ConnContext *>(arg);
-
-    std::string s(line);
-    auto first_sp = s.find(' ');
-    if (first_sp == std::string::npos)
-        return;
-    std::string label = s.substr(0, first_sp);
-    if (label != "EXPORTER_SECRET")
-        return;
-    auto second_sp = s.find(' ', first_sp + 1);
-    if (second_sp == std::string::npos)
-        return;
-
-    std::string secret_hex = s.substr(second_sp + 1);
-    if (secret_hex.size() % 2 != 0) {
-        std::cerr << "[KeyLog] Malformed hex string (odd length)\n";
-        return;
-    }
-
-    cc->exporterSecret.resize(secret_hex.size() / 2);
-    for (size_t i = 0; i < secret_hex.size(); i += 2) {
-        int hi = hexNibble(secret_hex[i]);
-        int lo = hexNibble(secret_hex[i + 1]);
-        if (hi < 0 || lo < 0) {
-            std::cerr << "[KeyLog] Invalid hex character in exporter secret\n";
-            cc->exporterSecret.cleanse();
-            return;
-        }
-        cc->exporterSecret.data()[i / 2] = static_cast<Byte>((hi << 4) | lo);
-    }
-}
-
-// ─── SSL_CTX factory
-// ──────────────────────────────────────────────────────────
+// ─── SSL_CTX factory ──────────────────────────────────────────────────────────
 
 SSL_CTX *
-create_client_ctx(const fs::path ca_cert,      //
-                  const fs::path client_chain, // client/client-chain.pem
-                                               // (leaf + intermediate)
-                  const fs::path client_key)   // client/client.key
+create_client_ctx(const fs::path ca_cert,
+                  const fs::path client_chain,
+                  const fs::path client_key)
 {
     SSL_CTX *ctx = SSL_CTX_new(TLS_client_method());
     if (!ctx)
@@ -111,33 +71,20 @@ create_client_ctx(const fs::path ca_cert,      //
                                      "ECDHE-RSA-CHACHA20-POLY1305") != 1)
         throw_ssl_error("set_cipher_list");
 
-    // ── TLS 1.3 suites
-    // ────────────────────────────────────────────────────────
+    // ── TLS 1.3 suites ───────────────────────────────────────────────────────
     if (SSL_CTX_set_ciphersuites(ctx, "TLS_AES_256_GCM_SHA384:"
                                       "TLS_CHACHA20_POLY1305_SHA256:"
                                       "TLS_AES_128_GCM_SHA256") != 1)
         throw_ssl_error("set_ciphersuites");
 
     // ── Server certificate verification ──────────────────────────────────────
-    // Point at your private root CA, NOT the system store.
-    // Using set_default_verify_paths() would accept any cert signed by any
-    // publicly trusted CA — an attacker with a Let's Encrypt cert could MITM.
     if (SSL_CTX_load_verify_locations(ctx, ca_cert.c_str(), nullptr) != 1)
         throw_ssl_error("load_verify_locations (root CA)");
 
     SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, nullptr);
-
-    // ── Verify depth ─────────────────────────────────────────────────────────
-    // Must be 2 for root → intermediate → leaf.
     SSL_CTX_set_verify_depth(ctx, 2);
 
-    // ── Client certificate (mTLS)
-    // ───────────────────────────────────────────── Load the client certificate
-    // chain. The chain file must contain the leaf cert followed by the
-    // intermediate CA cert (root is excluded). Using just client.crt here is
-    // the most common mTLS mistake — the server receives a leaf cert whose
-    // issuer it cannot find, causing error 20 "unable to get local issuer
-    // certificate".
+    // ── Client certificate (mTLS) ─────────────────────────────────────────────
     if (SSL_CTX_use_certificate_chain_file(ctx, client_chain.c_str()) != 1)
         throw_ssl_error("use_certificate_chain_file (client chain)");
 
@@ -145,32 +92,33 @@ create_client_ctx(const fs::path ca_cert,      //
                                     SSL_FILETYPE_PEM) != 1)
         throw_ssl_error("use_PrivateKey_file (client key)");
 
-    // Confirm the chain cert and key are a matched pair.
     if (SSL_CTX_check_private_key(ctx) != 1)
         throw_ssl_error("check_private_key (client)");
 
-    // ── ECDH curve selection
-    // ──────────────────────────────────────────────────
+    // ── ECDH curve selection ──────────────────────────────────────────────────
     if (SSL_CTX_set1_curves_list(ctx, "X25519:P-256:P-384") != 1)
         throw_ssl_error("set1_curves_list");
 
-    // ── Security options
-    // ──────────────────────────────────────────────────────
+    // ── Security options ──────────────────────────────────────────────────────
     SSL_CTX_set_options(ctx, SSL_OP_NO_TICKET);
     SSL_CTX_set_options(ctx, SSL_OP_NO_COMPRESSION);
 
-    // -- Register keylog callback
-    SSL_CTX_set_keylog_callback(ctx, setExporterSecret);
+    // BUG 6 FIX: Removed SSL_CTX_set_keylog_callback / setExporterSecret.
+    // We now derive the shared material via SSL_export_keying_material() after
+    // the handshake instead of capturing the raw TLS 1.3 EXPORTER_SECRET from
+    // the key-log.  Python's ssl.SSLSocket.export_keying_material() implements
+    // the same RFC 5705 / RFC 8446 §7.5 interface, so both sides produce
+    // identical bytes given the same label — something the keylog approach
+    // cannot guarantee from the Python side.
 
     return ctx;
 }
 
-// ─── Raw TCP connection
-// ───────────────────────────────────────────────────────
+// ─── Raw TCP connection ───────────────────────────────────────────────────────
 
 int connect_tcp(const std::string &host, uint16_t port) {
     addrinfo hints{}, *res = nullptr;
-    hints.ai_family = AF_UNSPEC;
+    hints.ai_family   = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
 
     int err =
@@ -196,8 +144,7 @@ int connect_tcp(const std::string &host, uint16_t port) {
     return fd;
 }
 
-// ─── TLS handshake + hostname verification
-// ────────────────────────────────────
+// ─── TLS handshake + hostname verification ────────────────────────────────────
 
 SSL *tls_connect(SSL_CTX *ctx, int tcp_fd, const std::string &hostname,
                  ConnContext &connCtx) {
@@ -205,20 +152,12 @@ SSL *tls_connect(SSL_CTX *ctx, int tcp_fd, const std::string &hostname,
     if (!ssl)
         throw_ssl_error("SSL_new");
 
-    SSL_set_app_data(ssl, &connCtx);
-
-    // SNI: send the hostname in ClientHello so the server selects the correct
-    // certificate when hosting multiple names on one IP.
     if (SSL_set_tlsext_host_name(ssl, hostname.c_str()) != 1)
         throw_ssl_error("SSL_set_tlsext_host_name (SNI)");
 
-    // Hostname verification: enforces that the server cert's SAN matches the
-    // hostname we connected to. Without this, any valid CA-signed cert suffices
-    // for MITM. X509_VERIFY_PARAM_set1_host checks SAN only — CN is deprecated.
     X509_VERIFY_PARAM *vpm = SSL_get0_param(ssl);
     X509_VERIFY_PARAM_set_hostflags(vpm, X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
-    if (X509_VERIFY_PARAM_set1_host(vpm, hostname.c_str(), hostname.size()) !=
-        1)
+    if (X509_VERIFY_PARAM_set1_host(vpm, hostname.c_str(), hostname.size()) != 1)
         throw_ssl_error("X509_VERIFY_PARAM_set1_host");
 
     if (SSL_set_fd(ssl, tcp_fd) != 1)
@@ -230,8 +169,6 @@ SSL *tls_connect(SSL_CTX *ctx, int tcp_fd, const std::string &hostname,
     std::cout << "[TLS] Version   : " << SSL_get_version(ssl) << "\n";
     std::cout << "[TLS] Cipher    : " << SSL_get_cipher(ssl) << "\n";
 
-    // Post-handshake paranoia check — SSL_connect should have already aborted
-    // on a bad chain, but make the failure mode explicit.
     long verify_result = SSL_get_verify_result(ssl);
     if (verify_result != X509_V_OK) {
         SSL_free(ssl);
@@ -240,7 +177,6 @@ SSL *tls_connect(SSL_CTX *ctx, int tcp_fd, const std::string &hostname,
             X509_verify_cert_error_string(verify_result));
     }
 
-    // Print the server's identity for audit logging.
     X509 *server_cert = SSL_get_peer_certificate(ssl);
     if (server_cert) {
         char subject_buf[256] = {};
@@ -250,11 +186,26 @@ SSL *tls_connect(SSL_CTX *ctx, int tcp_fd, const std::string &hostname,
         X509_free(server_cert);
     }
 
+    // BUG 6 FIX: Derive the shared exporter material via the standard RFC 5705
+    // / RFC 8446 §7.5 interface.  This produces the same value as Python's
+    // conn.export_keying_material(BIFROST_EXPORTER_LABEL, 32, None).
+    // We store it in connCtx so registerBifrost can pass it to HKDF.
+    constexpr size_t EXPORTER_LEN = 32;
+    connCtx.exporterSecret.resize(EXPORTER_LEN);
+    if (SSL_export_keying_material(
+            ssl,
+            connCtx.exporterSecret.data(), EXPORTER_LEN,
+            BIFROST_EXPORTER_LABEL.data(), BIFROST_EXPORTER_LABEL.size(),
+            nullptr, 0,
+            /*use_context=*/0) != 1) {
+        SSL_free(ssl);
+        throw_ssl_error("SSL_export_keying_material");
+    }
+
     return ssl;
 }
 
-// ─── Secure send / recv
-// ───────────────────────────────────────────────────────
+// ─── Secure send / recv ───────────────────────────────────────────────────────
 
 void tls_send(SSL *ssl, const void *data, size_t len) {
     if (len > static_cast<size_t>(std::numeric_limits<int>::max()))
@@ -264,7 +215,8 @@ void tls_send(SSL *ssl, const void *data, size_t len) {
     size_t sent = 0;
     while (sent < len) {
         int chunk = static_cast<int>(std::min(
-            len - sent, static_cast<size_t>(std::numeric_limits<int>::max())));
+            len - sent,
+            static_cast<size_t>(std::numeric_limits<int>::max())));
         int n = SSL_write(ssl, static_cast<const char *>(data) + sent, chunk);
         if (n <= 0) {
             int err = SSL_get_error(ssl, n);
@@ -292,41 +244,50 @@ std::string tls_recv(SSL *ssl, size_t max_bytes) {
     return buf;
 }
 
-// ─── Teardown
-// ─────────────────────────────────────────────────────────────────
+// ─── Teardown ─────────────────────────────────────────────────────────────────
 
 void tls_shutdown(SSL *ssl, int tcp_fd) {
-    // Two-phase shutdown: send close_notify, wait for peer's close_notify.
-    // Prevents truncation attacks where an attacker closes TCP early.
     int ret = SSL_shutdown(ssl);
     if (ret == 0) {
         ret = SSL_shutdown(ssl);
         if (ret < 0) {
             int err = SSL_get_error(ssl, ret);
-            std::cerr << "TLS Shutdown incomplete. SSL error: " << err
-                      << std::endl;
+            std::cerr << "TLS Shutdown incomplete. SSL error: " << err << "\n";
         }
     }
-
     SSL_free(ssl);
     close(tcp_fd);
 }
 
-// ─── main
-// ─────────────────────────────────────────────────────────────────────
-ServerRegData fetchServerRegData(SSL *ssl, int tcp_fd, const std::string host) {
+// ─── Registration helpers ─────────────────────────────────────────────────────
+
+// BUG 1+2 FIX: Accept 'path' separately from 'host' so the HTTP request line
+// is correct: "GET /signup/<pin> HTTP/1.1" instead of "GET <host> HTTP/1.1".
+ServerRegData fetchServerRegData(SSL *ssl, int tcp_fd,
+                                 const std::string &host,
+                                 const std::string &path)
+{
     std::stringstream requestStream;
-    requestStream << "GET " << host << " HTTP/1.1\r\n";
+    requestStream << "GET " << path << " HTTP/1.1\r\n";
     requestStream << "Host: " << host << "\r\n";
     requestStream << "Connection: close\r\n\r\n";
     auto request = requestStream.str();
 
     tls_send(ssl, request.c_str(), request.length());
-    std::string resp = tls_recv(ssl);
-    auto params = parseURLParams(resp, '&', '=');
-    if (!params.contains("PW_KEY") || !params.contains("ACC_INFO")) {
+
+    std::string resp = tls_recv(ssl, 4096);
+
+    size_t body_pos = resp.find("\r\n\r\n");
+    if (body_pos == std::string::npos) {
         tls_shutdown(ssl, tcp_fd);
-        throw std::runtime_error("Server response had missing fields");
+        throw std::runtime_error("Server response missing HTTP delimiter");
+    }
+    std::string body = resp.substr(body_pos + 4);
+
+    auto params = parseURLParams(body, '&', '=');
+    if (!params.contains("PW_KEY") || !params.contains("ACC_INFO")) {
+        throw std::runtime_error(
+            "Server response had missing fields. Body:\n" + body);
     }
 
     auto pwkey_bytes = hexToBytes(params["PW_KEY"]);
@@ -335,6 +296,10 @@ ServerRegData fetchServerRegData(SSL *ssl, int tcp_fd, const std::string host) {
     return {pwkey.clone(), std::string(params["ACC_INFO"])};
 }
 
+// BUG 2 FIX: Parse and preserve the path component from the bifrost URI.
+// The URI looks like: bifrost-totp://host=example.com/signup/123456&port=8443
+// parseURLParams gives us host="example.com/signup/123456" and port="8443".
+// We split host at the first '/' to get the pure hostname and the path.
 ConnInfo getConnInfo(const std::string_view &serverArgs) {
     if (!serverArgs.starts_with(BIFROST_PROTOCOL))
         throw std::runtime_error("Trying to connect with an invalid protocol");
@@ -345,12 +310,26 @@ ConnInfo getConnInfo(const std::string_view &serverArgs) {
         throw std::runtime_error("Given URL for registration does not contain "
                                  "required connection information");
 
-    std::string host(params["host"]), portstr(params["port"]);
+    std::string host_raw(params["host"]);
+    std::string portstr(params["port"]);
+
+    // Split host_raw at the first '/' to separate hostname from path.
+    std::string host, path;
+    size_t slash_pos = host_raw.find('/');
+    if (slash_pos != std::string::npos) {
+        host = host_raw.substr(0, slash_pos);
+        path = host_raw.substr(slash_pos); // e.g. "/signup/123456"
+    } else {
+        host = host_raw;
+        path = "/";
+    }
+
     auto port_ull = std::stoull(portstr, nullptr, 10);
     if (port_ull > UINT16_MAX)
         throw std::runtime_error("Given URL for registration does not contain "
                                  "a valid port for connection");
-    return {std::string(params["host"]), static_cast<uint16_t>(port_ull)};
+
+    return {host, static_cast<uint16_t>(port_ull), path};
 }
 
 Key registerBifrost(const ConnInfo &connInfo) {
@@ -358,39 +337,39 @@ Key registerBifrost(const ConnInfo &connInfo) {
     OpenSSL_add_ssl_algorithms();
 
     SSL_CTX *ctx = nullptr;
-    SSL *ssl = nullptr;
-    int fd = -1;
-    ConnContext connCtx;
+    SSL     *ssl = nullptr;
+    int      fd  = -1;
+    ConnContext  connCtx;
     ServerRegData regData;
-    SecureBytes totpKey;
     Key newKey;
 
     try {
         ctx = create_client_ctx(Paths::rootCACert(), Paths::certChain(),
                                 Paths::privKey());
-        fd = connect_tcp(connInfo.host, connInfo.port);
+        fd  = connect_tcp(connInfo.host, connInfo.port);
         ssl = tls_connect(ctx, fd, connInfo.host, connCtx);
+        // exporterSecret is now populated by tls_connect via SSL_export_keying_material
 
-        regData = fetchServerRegData(ssl, fd, connInfo.host);
+        // BUG 1+2 FIX: pass connInfo.path so the correct GET path is sent
+        regData = fetchServerRegData(ssl, fd, connInfo.host, connInfo.path);
+
         auto cert = SSL_get0_peer_certificate(ssl);
-
         newKey = KeyStore::buildKey(cert);
         newKey.accinfo = regData.ACC_INFO;
 
-        // Perform HKDF
+        // BUG 5 FIX: TOTP_HKDF_INFO is now 16 bytes (no null terminator) —
+        // defined via string_view in tls.hpp.  Python passes the same 16 bytes.
         hkdf_sha256(connCtx.exporterSecret, regData.KEY, TOTP_HKDF_INFO,
                     TOTP_KEY_LEN, newKey.secret);
 
         tls_shutdown(ssl, fd);
         ssl = nullptr;
-        fd = -1;
+        fd  = -1;
 
     } catch (const std::exception &e) {
         std::cerr << "[FATAL] " << e.what() << "\n";
-        if (ssl)
-            SSL_free(ssl);
-        if (fd >= 0)
-            close(fd);
+        if (ssl) SSL_free(ssl);
+        if (fd >= 0) close(fd);
         SSL_CTX_free(ctx);
         throw std::runtime_error("Could not register bifrost with server");
     }
