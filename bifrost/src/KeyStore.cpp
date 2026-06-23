@@ -1,11 +1,16 @@
 #include "bifrost.hpp"
+#include <KDF.hpp>
 #include <KeyStore.hpp>
 #include <cassert>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
+#include <iomanip>
 #include <openssl/crypto.h>
 #include <openssl/evp.h>
+#include <openssl/rand.h>
+#include <ranges>
 #include <securebytes.hpp>
 #include <stdexcept>
 #include <utility.hpp>
@@ -133,15 +138,25 @@ EncryptedBlob EncryptedBlob::deserialize(const Bytes &data) {
 // ========================================================================================
 
 SecureBytes KeyStore::_encryptionKey;
+SecureBytes KeyStore::_salt;
 std::unordered_map<Bytes, Key, BytesHash> KeyStore::_store;
 
-void KeyStore::init(Bytes &encryptionKey) {
-    if (encryptionKey.size() != KEY_STORE_ENC_KEY_SIZE)
-        throw std::runtime_error(
-            "Could not initialize KeyStore: given key was of incorrect length");
+void KeyStore::init(std::string &password) {
+    SecureBytes passwd((const Byte *)password.data(), password.size());
 
-    _encryptionKey = SecureBytes(encryptionKey);
-    if (fs::exists(Paths::keyfile()))
+    _salt.resize(PBKDF2_SALT_SIZE);
+    bool keyfileExists = fs::exists(Paths::keyfile());
+
+    if (keyfileExists) {
+        std::ifstream keyfile(Paths::keyfile(), std::ios::binary);
+        keyfile.read((char *)_salt.data(), PBKDF2_SALT_SIZE);
+    } else
+        RAND_bytes(_salt.data(), PBKDF2_SALT_SIZE);
+
+    pbkdf2_sha256(passwd, _salt, PBKDF2_N_ITERATIONS, _encryptionKey);
+    OPENSSL_cleanse(password.data(), password.size());
+
+    if (keyfileExists)
         loadStore();
 }
 
@@ -222,7 +237,6 @@ void KeyStore::store(X509 *cert, const std::string &accinfo,
     Key key = buildKey(cert);
     key.secret = std::move(secret);
     key.accinfo = accinfo;
-    OPENSSL_cleanse(secret.data(), secret.size());
     Bytes ukid = getUKID(key);
     _store[ukid] = std::move(key);
 }
@@ -329,7 +343,8 @@ void KeyStore::deserialize(const Bytes &data) {
         Key k = Key::deserialize(Bytes(data.begin() + offset + 4,
                                        data.begin() + offset + 4 + keySize));
         offset += 4 + keySize;
-        _store[k.fingerprint] = std::move(k);
+        Bytes ukid = getUKID(k);
+        _store[ukid] = std::move(k);
     }
     if (offset != data.size())
         throw std::runtime_error(
@@ -443,11 +458,16 @@ void KeyStore::decryptStore(const EncryptedBlob &blob) {
 void KeyStore::saveStore() {
     EncryptedBlob eb = encryptStore();
     Bytes ebSerial = eb.serialize();
-    writeAtomic(Paths::keyfile(), ebSerial);
+    Bytes storeData;
+    storeData.reserve(PBKDF2_SALT_SIZE + ebSerial.size());
+    storeData.insert(storeData.end(), _salt.begin(), _salt.end());
+    storeData.insert(storeData.end(), ebSerial.begin(), ebSerial.end());
+    writeAtomic(Paths::keyfile(), storeData);
 }
 
 void KeyStore::loadStore() {
-    Bytes ebSerial = readAtomic(Paths::keyfile());
+    Bytes storeData = readAtomic(Paths::keyfile());
+    Bytes ebSerial(storeData.begin() + PBKDF2_SALT_SIZE, storeData.end());
     EncryptedBlob eb = EncryptedBlob::deserialize(ebSerial);
     decryptStore(eb);
 }

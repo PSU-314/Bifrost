@@ -1,9 +1,11 @@
 #include <KeyStore.hpp>
+#include <algorithm>
 #include <bifrost.hpp>
 #include <cstdio>
 #include <cstdlib>
 #include <fcntl.h>
 #include <filesystem>
+#include <iomanip>
 #include <ios>
 #include <iostream>
 #include <limits>
@@ -43,15 +45,11 @@ void unlockBifrost() {
     std::string passwd;
     std::cin >> passwd;
 
-    unsigned char digest[SHA256_DIGEST_LENGTH];
-    SHA256((unsigned char *)passwd.data(), passwd.size(), digest);
-    encKey = Bytes(digest, digest + SHA256_DIGEST_LENGTH);
-
     try {
-        KeyStore::init(encKey);
+        KeyStore::init(passwd);
     } catch (const std::runtime_error &e) {
-        std::cerr << "Incorrect password! KeyStore Decryption failed"
-                  << std::endl;
+        std::cerr << "Incorrect password! KeyStore Decryption failed\n"
+                  << e.what() << std::endl;
         exit(EXIT_FAILURE);
     }
 }
@@ -130,7 +128,8 @@ int main(int argc, char **argv) {
                 std::cout << s << " ";
             std::cout << std::endl;
             auto [otp, validity] = generateOTP(key->secret);
-            std::cout << "    TOTP: " << otp << std::endl;
+            std::cout << "    TOTP: " << std::setfill('0')
+                      << std::setw(OTP_SIZE) << otp << std::endl;
             std::cout << "    Validity: " << validity << "s\n    ";
             printProgressBar((float)validity / TIME_WINDOW, 30);
             std::cout << std::endl << std::endl;

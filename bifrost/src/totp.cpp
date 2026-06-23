@@ -6,6 +6,8 @@
 #include <totp.hpp>
 #include <utility.hpp>
 
+// TODO:
+// SECURITY ISSUE: SHA1 is deprecated. Consider using SHA256
 Bytes generate_hmac_sha1(const SecureBytes &key, const Bytes &msg) {
     Bytes hash(TOTP_DIGEST_SIZE);
     unsigned int len = 0;

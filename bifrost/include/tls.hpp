@@ -11,12 +11,13 @@
 
 #include <KeyStore.hpp>
 #include <bifrost.hpp>
-#include <bits/stdc++.h>
 #include <cstring>
 #include <securebytes.hpp>
 #include <string>
 
 constexpr char TOTP_HKDF_INFO_[]{"bifrost-totp-key"};
+constexpr char EXPORTER_SECRET_LABEL[]{"EXPORTER_SECRET bifrost-totp v1"};
+constexpr size_t EXPORTER_SECRET_SIZE = 48;
 const Bytes TOTP_HKDF_INFO(TOTP_HKDF_INFO_,
                            TOTP_HKDF_INFO_ + sizeof(TOTP_HKDF_INFO_));
 

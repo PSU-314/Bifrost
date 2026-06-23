@@ -21,6 +21,8 @@
 #define KEY_STORE_ENC_KEY_SIZE 32
 #define ENC_BLOB_NONCE_SIZE 12
 #define ENC_BLOB_TAG_SIZE 16
+#define PBKDF2_N_ITERATIONS 310000
+#define PBKDF2_SALT_SIZE 16
 const Bytes KEY_STORE_SIGNATURE{0x42, 0x4B, 0x53, 0x4D, 0x00, 0x01, 0x00, 0x02};
 
 struct Key {
@@ -57,10 +59,11 @@ struct EncryptedBlob {
 class KeyStore {
     private:
         static SecureBytes _encryptionKey;
+        static SecureBytes _salt;
         static std::unordered_map<Bytes, Key, BytesHash> _store;
 
     public:
-        static void init(Bytes &encryptionKey);
+        static void init(std::string &password);
         static size_t size();
         static Bytes computeFingerprint(X509 *cert);
         static std::string extractCN(X509_NAME *name);

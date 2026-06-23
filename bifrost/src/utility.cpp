@@ -72,11 +72,9 @@ std::string bytesToHex(const Bytes &bytes) {
 }
 
 Bytes timeToBytes(const std::time_t time) {
-    Bytes bytes;
-    bytes.reserve(8);
-
-    std::time_t t = time;
-    for (int b = 0; b < 8; b++) {
+    Bytes bytes(8);
+    uint64_t t = static_cast<uint64_t>(time);
+    for (int b = 7; b >= 0; b--) {
         bytes[b] = static_cast<Byte>(t & 0xFF);
         t >>= 8;
     }

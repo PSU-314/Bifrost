@@ -4,6 +4,7 @@
 #include <openssl/err.h>
 #include <openssl/prov_ssl.h>
 #include <openssl/ssl.h>
+#include <openssl/tls1.h>
 #include <openssl/x509v3.h>
 #include <securebytes.hpp>
 #include <totp.hpp>
@@ -14,7 +15,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#include <HKDF.hpp>
+#include <KDF.hpp>
 #include <KeyStore.hpp>
 #include <bifrost.hpp>
 #include <cstring>
@@ -43,43 +44,6 @@ static void throw_ssl_error(const std::string &context) {
         msg += ": (no OpenSSL error queue entry)";
 
     throw std::runtime_error(msg);
-}
-
-static void setExporterSecret(const SSL *ssl, const char *line) {
-    (void)ssl;
-    void *arg = SSL_get_app_data(ssl);
-    if (!arg)
-        return;
-    auto *cc = static_cast<ConnContext *>(arg);
-
-    std::string s(line);
-    auto first_sp = s.find(' ');
-    if (first_sp == std::string::npos)
-        return;
-    std::string label = s.substr(0, first_sp);
-    if (label != "EXPORTER_SECRET")
-        return;
-    auto second_sp = s.find(' ', first_sp + 1);
-    if (second_sp == std::string::npos)
-        return;
-
-    std::string secret_hex = s.substr(second_sp + 1);
-    if (secret_hex.size() % 2 != 0) {
-        std::cerr << "[KeyLog] Malformed hex string (odd length)\n";
-        return;
-    }
-
-    cc->exporterSecret.resize(secret_hex.size() / 2);
-    for (size_t i = 0; i < secret_hex.size(); i += 2) {
-        int hi = hexNibble(secret_hex[i]);
-        int lo = hexNibble(secret_hex[i + 1]);
-        if (hi < 0 || lo < 0) {
-            std::cerr << "[KeyLog] Invalid hex character in exporter secret\n";
-            cc->exporterSecret.cleanse();
-            return;
-        }
-        cc->exporterSecret.data()[i / 2] = static_cast<Byte>((hi << 4) | lo);
-    }
 }
 
 // ─── SSL_CTX factory
@@ -158,9 +122,6 @@ create_client_ctx(const fs::path ca_cert,      //
     // ──────────────────────────────────────────────────────
     SSL_CTX_set_options(ctx, SSL_OP_NO_TICKET);
     SSL_CTX_set_options(ctx, SSL_OP_NO_COMPRESSION);
-
-    // -- Register keylog callback
-    SSL_CTX_set_keylog_callback(ctx, setExporterSecret);
 
     return ctx;
 }
@@ -250,6 +211,14 @@ SSL *tls_connect(SSL_CTX *ctx, int tcp_fd, const std::string &hostname,
         X509_free(server_cert);
     }
 
+    connCtx.exporterSecret.resize(EXPORTER_SECRET_SIZE);
+    if (SSL_export_keying_material(ssl, connCtx.exporterSecret.data(),
+                                   EXPORTER_SECRET_SIZE, EXPORTER_SECRET_LABEL,
+                                   sizeof(EXPORTER_SECRET_LABEL), nullptr, 0,
+                                   0) != 1)
+        throw_ssl_error(
+            "SSL_export_keying_material failed to extract the exporter secret");
+
     return ssl;
 }
 
@@ -314,6 +283,12 @@ void tls_shutdown(SSL *ssl, int tcp_fd) {
 
 // ─── main
 // ─────────────────────────────────────────────────────────────────────
+
+// TODO:
+// Malformed GET request.
+// GET /api/endpoint HTTP/1.1\r\n
+// Host: <host>\r\n
+// Connection: close\r\n
 ServerRegData fetchServerRegData(SSL *ssl, int tcp_fd, const std::string host) {
     std::stringstream requestStream;
     requestStream << "GET " << host << " HTTP/1.1\r\n";
