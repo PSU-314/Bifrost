@@ -16,6 +16,6 @@ struct TOTP {
               validity(validity) {}
 };
 
-Bytes generate_hmac_sha1(const SecureBytes &key, const std::string &msg);
+Bytes generate_hmac_sha1(const SecureBytes &key, const Bytes &msg);
 uint32_t genSample(const SecureBytes &key, std::time_t time);
 TOTP generateOTP(const SecureBytes &key);

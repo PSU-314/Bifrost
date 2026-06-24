@@ -5,6 +5,7 @@
 #include <openssl/prov_ssl.h>
 #include <openssl/ssl.h>
 #include <openssl/tls1.h>
+#include <openssl/x509_vfy.h>
 #include <openssl/x509v3.h>
 #include <securebytes.hpp>
 #include <totp.hpp>
@@ -48,13 +49,8 @@ static void throw_ssl_error(const std::string &context) {
 
 // ─── SSL_CTX factory
 // ──────────────────────────────────────────────────────────
-
-SSL_CTX *
-create_client_ctx(const fs::path ca_cert,      //
-                  const fs::path client_chain, // client/client-chain.pem
-                                               // (leaf + intermediate)
-                  const fs::path client_key)   // client/client.key
-{
+SSL_CTX *create_client_ctx(const fs::path ca_cert, const fs::path client_chain,
+                           const fs::path client_key) {
     SSL_CTX *ctx = SSL_CTX_new(TLS_client_method());
     if (!ctx)
         throw_ssl_error("SSL_CTX_new");
@@ -75,33 +71,21 @@ create_client_ctx(const fs::path ca_cert,      //
                                      "ECDHE-RSA-CHACHA20-POLY1305") != 1)
         throw_ssl_error("set_cipher_list");
 
-    // ── TLS 1.3 suites
-    // ────────────────────────────────────────────────────────
+    // ── TLS 1.3 suites ───────────────────────────────────────────────────────
     if (SSL_CTX_set_ciphersuites(ctx, "TLS_AES_256_GCM_SHA384:"
                                       "TLS_CHACHA20_POLY1305_SHA256:"
                                       "TLS_AES_128_GCM_SHA256") != 1)
         throw_ssl_error("set_ciphersuites");
 
     // ── Server certificate verification ──────────────────────────────────────
-    // Point at your private root CA, NOT the system store.
-    // Using set_default_verify_paths() would accept any cert signed by any
-    // publicly trusted CA — an attacker with a Let's Encrypt cert could MITM.
     if (SSL_CTX_load_verify_locations(ctx, ca_cert.c_str(), nullptr) != 1)
         throw_ssl_error("load_verify_locations (root CA)");
 
     SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, nullptr);
-
-    // ── Verify depth ─────────────────────────────────────────────────────────
-    // Must be 2 for root → intermediate → leaf.
     SSL_CTX_set_verify_depth(ctx, 2);
 
     // ── Client certificate (mTLS)
-    // ───────────────────────────────────────────── Load the client certificate
-    // chain. The chain file must contain the leaf cert followed by the
-    // intermediate CA cert (root is excluded). Using just client.crt here is
-    // the most common mTLS mistake — the server receives a leaf cert whose
-    // issuer it cannot find, causing error 20 "unable to get local issuer
-    // certificate".
+    // ─────────────────────────────────────────────
     if (SSL_CTX_use_certificate_chain_file(ctx, client_chain.c_str()) != 1)
         throw_ssl_error("use_certificate_chain_file (client chain)");
 
@@ -109,7 +93,6 @@ create_client_ctx(const fs::path ca_cert,      //
                                     SSL_FILETYPE_PEM) != 1)
         throw_ssl_error("use_PrivateKey_file (client key)");
 
-    // Confirm the chain cert and key are a matched pair.
     if (SSL_CTX_check_private_key(ctx) != 1)
         throw_ssl_error("check_private_key (client)");
 
@@ -166,20 +149,22 @@ SSL *tls_connect(SSL_CTX *ctx, int tcp_fd, const std::string &hostname,
     if (!ssl)
         throw_ssl_error("SSL_new");
 
-    SSL_set_app_data(ssl, &connCtx);
-
-    // SNI: send the hostname in ClientHello so the server selects the correct
-    // certificate when hosting multiple names on one IP.
     if (SSL_set_tlsext_host_name(ssl, hostname.c_str()) != 1)
         throw_ssl_error("SSL_set_tlsext_host_name (SNI)");
 
-    // Hostname verification: enforces that the server cert's SAN matches the
-    // hostname we connected to. Without this, any valid CA-signed cert suffices
-    // for MITM. X509_VERIFY_PARAM_set1_host checks SAN only — CN is deprecated.
     X509_VERIFY_PARAM *vpm = SSL_get0_param(ssl);
     X509_VERIFY_PARAM_set_hostflags(vpm, X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
-    if (X509_VERIFY_PARAM_set1_host(vpm, hostname.c_str(), hostname.size()) !=
-        1)
+
+    struct in_addr addr4;
+    struct in6_addr addr6;
+    bool is_ip = (inet_pton(AF_INET, hostname.c_str(), &addr4) == 1 ||
+                  inet_pton(AF_INET6, hostname.c_str(), &addr6) == 1);
+
+    if (is_ip) {
+        if (X509_VERIFY_PARAM_set1_ip_asc(vpm, hostname.c_str()) != 1)
+            throw_ssl_error("X509_VERIFY_PARAM_set1_ip_asc failed");
+    } else if (X509_VERIFY_PARAM_set1_host(vpm, hostname.c_str(),
+                                           hostname.size()) != 1)
         throw_ssl_error("X509_VERIFY_PARAM_set1_host");
 
     if (SSL_set_fd(ssl, tcp_fd) != 1)
@@ -191,8 +176,6 @@ SSL *tls_connect(SSL_CTX *ctx, int tcp_fd, const std::string &hostname,
     std::cout << "[TLS] Version   : " << SSL_get_version(ssl) << "\n";
     std::cout << "[TLS] Cipher    : " << SSL_get_cipher(ssl) << "\n";
 
-    // Post-handshake paranoia check — SSL_connect should have already aborted
-    // on a bad chain, but make the failure mode explicit.
     long verify_result = SSL_get_verify_result(ssl);
     if (verify_result != X509_V_OK) {
         SSL_free(ssl);
@@ -201,7 +184,6 @@ SSL *tls_connect(SSL_CTX *ctx, int tcp_fd, const std::string &hostname,
             X509_verify_cert_error_string(verify_result));
     }
 
-    // Print the server's identity for audit logging.
     X509 *server_cert = SSL_get_peer_certificate(ssl);
     if (server_cert) {
         char subject_buf[256] = {};
@@ -212,10 +194,10 @@ SSL *tls_connect(SSL_CTX *ctx, int tcp_fd, const std::string &hostname,
     }
 
     connCtx.exporterSecret.resize(EXPORTER_SECRET_SIZE);
-    if (SSL_export_keying_material(ssl, connCtx.exporterSecret.data(),
-                                   EXPORTER_SECRET_SIZE, EXPORTER_SECRET_LABEL,
-                                   sizeof(EXPORTER_SECRET_LABEL), nullptr, 0,
-                                   0) != 1)
+    if (SSL_export_keying_material(
+            ssl, connCtx.exporterSecret.data(), EXPORTER_SECRET_SIZE,
+            EXPORTER_SECRET_LABEL.data(), EXPORTER_SECRET_LABEL.size(), nullptr,
+            0, 0) != 1)
         throw_ssl_error(
             "SSL_export_keying_material failed to extract the exporter secret");
 
@@ -265,43 +247,44 @@ std::string tls_recv(SSL *ssl, size_t max_bytes) {
 // ─────────────────────────────────────────────────────────────────
 
 void tls_shutdown(SSL *ssl, int tcp_fd) {
-    // Two-phase shutdown: send close_notify, wait for peer's close_notify.
-    // Prevents truncation attacks where an attacker closes TCP early.
     int ret = SSL_shutdown(ssl);
     if (ret == 0) {
         ret = SSL_shutdown(ssl);
         if (ret < 0) {
             int err = SSL_get_error(ssl, ret);
-            std::cerr << "TLS Shutdown incomplete. SSL error: " << err
-                      << std::endl;
+            std::cerr << "TLS Shutdown incomplete. SSL error: " << err << "\n";
         }
     }
-
     SSL_free(ssl);
     close(tcp_fd);
 }
 
-// ─── main
-// ─────────────────────────────────────────────────────────────────────
+// ─── Registration helpers
+// ─────────────────────────────────────────────────────
 
-// TODO:
-// Malformed GET request.
-// GET /api/endpoint HTTP/1.1\r\n
-// Host: <host>\r\n
-// Connection: close\r\n
-ServerRegData fetchServerRegData(SSL *ssl, int tcp_fd, const std::string host) {
+ServerRegData fetchServerRegData(SSL *ssl, int tcp_fd, const std::string &host,
+                                 const std::string &path) {
     std::stringstream requestStream;
-    requestStream << "GET " << host << " HTTP/1.1\r\n";
+    requestStream << "GET " << path << " HTTP/1.1\r\n";
     requestStream << "Host: " << host << "\r\n";
     requestStream << "Connection: close\r\n\r\n";
     auto request = requestStream.str();
 
     tls_send(ssl, request.c_str(), request.length());
-    std::string resp = tls_recv(ssl);
-    auto params = parseURLParams(resp, '&', '=');
-    if (!params.contains("PW_KEY") || !params.contains("ACC_INFO")) {
+
+    std::string resp = tls_recv(ssl, 4096);
+
+    size_t body_pos = resp.find("\r\n\r\n");
+    if (body_pos == std::string::npos) {
         tls_shutdown(ssl, tcp_fd);
-        throw std::runtime_error("Server response had missing fields");
+        throw std::runtime_error("Server response missing HTTP delimiter");
+    }
+    std::string body = resp.substr(body_pos + 4);
+
+    auto params = parseURLParams(body, '&', '=');
+    if (!params.contains("PW_KEY") || !params.contains("ACC_INFO")) {
+        throw std::runtime_error("Server response had missing fields. Body:\n" +
+                                 body);
     }
 
     auto pwkey_bytes = hexToBytes(params["PW_KEY"]);
@@ -320,12 +303,25 @@ ConnInfo getConnInfo(const std::string_view &serverArgs) {
         throw std::runtime_error("Given URL for registration does not contain "
                                  "required connection information");
 
-    std::string host(params["host"]), portstr(params["port"]);
+    std::string host_raw(params["host"]);
+    std::string portstr(params["port"]);
+
+    std::string host, path;
+    size_t slash_pos = host_raw.find('/');
+    if (slash_pos != std::string::npos) {
+        host = host_raw.substr(0, slash_pos);
+        path = host_raw.substr(slash_pos);
+    } else {
+        host = host_raw;
+        path = "/";
+    }
+
     auto port_ull = std::stoull(portstr, nullptr, 10);
     if (port_ull > UINT16_MAX)
         throw std::runtime_error("Given URL for registration does not contain "
                                  "a valid port for connection");
-    return {std::string(params["host"]), static_cast<uint16_t>(port_ull)};
+
+    return {host, static_cast<uint16_t>(port_ull), path};
 }
 
 Key registerBifrost(const ConnInfo &connInfo) {
@@ -337,7 +333,6 @@ Key registerBifrost(const ConnInfo &connInfo) {
     int fd = -1;
     ConnContext connCtx;
     ServerRegData regData;
-    SecureBytes totpKey;
     Key newKey;
 
     try {
@@ -345,14 +340,18 @@ Key registerBifrost(const ConnInfo &connInfo) {
                                 Paths::privKey());
         fd = connect_tcp(connInfo.host, connInfo.port);
         ssl = tls_connect(ctx, fd, connInfo.host, connCtx);
+        // exporterSecret is now populated by tls_connect via
+        // SSL_export_keying_material
 
-        regData = fetchServerRegData(ssl, fd, connInfo.host);
+        // BUG 1+2 FIX: pass connInfo.path so the correct GET path is sent
+        regData = fetchServerRegData(ssl, fd, connInfo.host, connInfo.path);
+
         auto cert = SSL_get0_peer_certificate(ssl);
-
         newKey = KeyStore::buildKey(cert);
         newKey.accinfo = regData.ACC_INFO;
 
-        // Perform HKDF
+        // BUG 5 FIX: TOTP_HKDF_INFO is now 16 bytes (no null terminator) —
+        // defined via string_view in tls.hpp.  Python passes the same 16 bytes.
         hkdf_sha256(connCtx.exporterSecret, regData.KEY, TOTP_HKDF_INFO,
                     TOTP_KEY_LEN, newKey.secret);
 

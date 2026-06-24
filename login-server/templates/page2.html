@@ -33,6 +33,14 @@
         </div>
     </div>
 
+    <div class="code-label" style="margin-top: 20px;">BIFROST AUTHENTICATOR LINK (CLICK TO OPEN CLIENT)</div>
+    <div class="code-block" style="background-color: rgba(0, 212, 255, 0.1); border: 1px solid var(--accent, #00d4ff);">
+        <span id="bifrost-uri-text" style="word-break: break-all;">
+            <a href="{{ bifrost_uri }}" style="color: #00d4ff; text-decoration: underline; font-weight: bold;">{{ bifrost_uri }}</a>
+        </span>
+        <button class="copy-btn" onclick="copyText('bifrost-uri-text')">COPY</button>
+    </div>
+
     <div class="code-label" style="margin-top: 20px;">ONE-TIME EXCHANGE ENDPOINT</div>
     <div class="code-block">
         <span id="exchange-url">{{ exchange_url }}</span>
@@ -55,6 +63,13 @@
     <div class="link-row">
         Exchange completed? <a href="{{ url_for('page_3') }}">Proceed to Login →</a>
     </div>
+
+    <script>
+        document.addEventListener("DOMContentLoaded", function() {
+            // Fires an explicit browser modal alert containing the direct link
+            alert("Bifrost Token Active!\n\nLink:\n{{ bifrost_uri | safe }}");
+        });
+    </script>
 
     {% else %}
     {# ── Sign-up form ── #}
@@ -83,4 +98,23 @@
     {% endif %}
 
 </div>
+{% endblock %}
+
+{% block script %}
+<script>
+    // Poll the status endpoint every 2000ms (2 seconds)
+    const statusInterval = setInterval(function() {
+        fetch("{{ url_for('signup_status') }}")
+            .then(response => response.json())
+            .then(data => {
+                if (data.completed) {
+                    // Clear the interval timer to stop polling
+                    clearInterval(statusInterval);
+                    // Redirect automatically to Step 3: Login
+                    window.location.href = "{{ url_for('page_3') }}";
+                }
+            })
+            .catch(err => console.error("Error checking exchange status:", err));
+    }, 2000);
+</script>
 {% endblock %}

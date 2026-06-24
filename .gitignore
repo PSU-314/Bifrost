@@ -1,13 +1,16 @@
 .cache/
 bifrost/build/
 bifrost/test/
+bifrost/certs/
 login-server/utils/__pycache__/
 login-server/bifrost.db
+login-server/pki/
 build/
 
 pki/client/
 pki/server/
 pki/intermediate-ca/
 pki/root-ca/
+pki_staging/
 
 totp.key
