@@ -1,0 +1,17 @@
+# login-server/requirements.txt
+# Python >= 3.12 required (ctypes SSL pointer layout assumed for 3.12;
+# if upgrading to 3.13+, replace the ctypes workaround in app.py with the
+# native ssl.SSLSocket.export_keying_material() added in 3.13).
+
+# ── Web framework ────────────────────────────────────────────────────────────
+Flask==3.1.3
+Werkzeug==3.1.7
+
+# ── ORM / database ───────────────────────────────────────────────────────────
+Flask-SQLAlchemy==3.1.1
+SQLAlchemy==2.0.51
+
+# ── Password / key derivation ─────────────────────────────────────────────────
+# argon2-cffi wraps the reference Argon2 C library via argon2-cffi-bindings.
+# argon2.low_level.hash_secret_raw() is used in app.py to derive PW_KEY.
+argon2-cffi==25.1.0
