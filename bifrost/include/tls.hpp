@@ -1,3 +1,5 @@
+#pragma once
+
 #include <openssl/crypto.h>
 #include <openssl/err.h>
 #include <openssl/ssl.h>
@@ -24,8 +26,8 @@ constexpr size_t EXPORTER_SECRET_SIZE = 48;
 // BUG 5 FIX: Use a Bytes literal (not a char array via sizeof) so there is no
 // hidden null terminator.  Both sides now agree on exactly 16 info bytes.
 constexpr std::string_view TOTP_HKDF_INFO_STR{"bifrost-totp-key"};
-const Bytes TOTP_HKDF_INFO(TOTP_HKDF_INFO_STR.begin(),
-                           TOTP_HKDF_INFO_STR.end());
+inline const Bytes TOTP_HKDF_INFO(TOTP_HKDF_INFO_STR.begin(),
+                                  TOTP_HKDF_INFO_STR.end());
 
 // BUG 6 FIX: Agreed exporter label used by SSL_export_keying_material() on the
 // C++ side and conn.export_keying_material() on the Python side.  Both RFC 5705

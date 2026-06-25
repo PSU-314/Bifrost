@@ -30,7 +30,7 @@ INSTALL_BIN_DIR="$INSTALL_PREFIX/bin"
 INSTALL_DESKTOP_DIR="$INSTALL_PREFIX/share/applications"
 CONFIG_DIR="$HOME/.config/$PROJECT_NAME"
 
-echo "SCRIPT_DIR: $SCRIPT_DIR"
+OS="$(uname -s)"
 
 log()  { echo -e "\033[1;34m[install]\033[0m $*"; }
 err()  { echo -e "\033[1;31m[error]\033[0m $*" >&2; }
@@ -45,7 +45,9 @@ if [[ "${1:-}" == "--uninstall" ]]; then
     rm -f "$INSTALL_BIN_DIR/$BINARY_NAME"
     rm -f "$INSTALL_DESKTOP_DIR/$DESKTOP_FILE_NAME"
     rm -rf "$CONFIG_DIR"
-    update-desktop-database "$INSTALL_DESKTOP_DIR" 2>/dev/null || true
+    if [[ "$OS" == "Linux" ]]; then
+        update-desktop-database "$INSTALL_DESKTOP_DIR" 2>/dev/null || true
+    fi
     log "Uninstalled successfully."
     exit 0
 fi
@@ -56,6 +58,13 @@ if [[ "${1:-}" == "--clean" ]]; then
     rm -rf "$SCRIPT_DIR/$BUILD_DIR"
 fi
 
+# ── Parallel job count (cross-platform) ──────────────────────────────────────
+if [[ "$OS" == "Darwin" ]]; then
+    JOBS="$(sysctl -n hw.logicalcpu)"
+else
+    JOBS="$(nproc)"
+fi
+
 # ---- Build -------------------------------------------------------------
 log "Configuring CMake build ($BUILD_TYPE)..."
 cmake -S "$SCRIPT_DIR" -B "$SCRIPT_DIR/$BUILD_DIR" \
@@ -63,7 +72,7 @@ cmake -S "$SCRIPT_DIR" -B "$SCRIPT_DIR/$BUILD_DIR" \
     -DCMAKE_INSTALL_PREFIX="$INSTALL_PREFIX"
 
 log "Building $PROJECT_NAME..."
-cmake --build "$SCRIPT_DIR/$BUILD_DIR" --parallel "$(nproc)"
+cmake --build "$SCRIPT_DIR/$BUILD_DIR" --parallel "$JOBS"
 
 BUILT_BINARY="$SCRIPT_DIR/$BUILD_DIR/src/$BINARY_NAME"
 if [[ ! -f "$BUILT_BINARY" ]]; then
@@ -74,11 +83,6 @@ fi
 
 log "Installing $PROJECT_NAME (Binaries & Desktop file)"
 cmake --install "$SCRIPT_DIR/$BUILD_DIR"
-
-# ---- Install binary ---------------------------------------------------
-log "Installing binary to $INSTALL_BIN_DIR ..."
-mkdir -p "$INSTALL_BIN_DIR"
-install -m 755 "$BUILT_BINARY" "$INSTALL_BIN_DIR/$BINARY_NAME"
 
 # ---- Install certificates ---------------------------------------------
 log "Installing certificates to $CONFIG_DIR/certs ..."
@@ -96,35 +100,28 @@ for key in "$SCRIPT_DIR/certs/"*.key; do
     fi
 done
 
-# # ---- Install desktop file (with path rewritten to the installed binary) ---
-# log "Installing desktop file to $INSTALL_DESKTOP_DIR ..."
-# mkdir -p "$INSTALL_DESKTOP_DIR"
-#
-# # Rewrite the Exec= line so it points at the installed binary location,
-# # regardless of what path was hardcoded in the source .desktop file.
-# sed -e "s|^Exec=.*|Exec=$INSTALL_BIN_DIR/$BINARY_NAME %u|" \
-#     "$SCRIPT_DIR/$DESKTOP_FILE_NAME" > "$INSTALL_DESKTOP_DIR/$DESKTOP_FILE_NAME"
-#
-# chmod 644 "$INSTALL_DESKTOP_DIR/$DESKTOP_FILE_NAME"
-#
-# # ---- Validate desktop file (best-effort) -------------------------------
-# if command -v desktop-file-validate >/dev/null 2>&1; then
-#     log "Validating desktop file..."
-#     desktop-file-validate "$INSTALL_DESKTOP_DIR/$DESKTOP_FILE_NAME" || true
-# fi
+# ── Register MIME / URL scheme ────────────────────────────────────────────────
+if [[ "$OS" == "Linux" ]]; then
+    log "Refreshing desktop database..."
+    update-desktop-database "$INSTALL_DESKTOP_DIR" 2>/dev/null || true
 
-# ---- Refresh desktop database and register protocol -----------------------
-log "Refreshing desktop database..."
-update-desktop-database "$INSTALL_PREFIX/share/applications" 2>/dev/null || true
-
-log "Registering $MIME_SCHEME -> $DESKTOP_FILE_NAME as default handler..."
-xdg-mime default "$DESKTOP_FILE_NAME" "$MIME_SCHEME"
+    log "Registering $MIME_SCHEME -> $DESKTOP_FILE_NAME ..."
+    xdg-mime default "$DESKTOP_FILE_NAME" "$MIME_SCHEME"
+elif [[ "$OS" == "Darwin" ]]; then
+    # macOS URL scheme registration requires an app bundle with Info.plist
+    # CFBundleURLTypes. A plain binary cannot register URL schemes on macOS
+    # without going through LaunchServices. No automated registration is
+    # possible here; instruct the user.
+    log "macOS: URL scheme registration requires an app bundle."
+    log "Add 'bifrost-totp' to CFBundleURLTypes in your Info.plist and run:"
+    log "  /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister -f <YourApp.app>"
+fi
 
 log "Done."
 echo
-echo "  Binary:       $INSTALL_BIN_DIR/$BINARY_NAME"
-echo "  Desktop file: $INSTALL_DESKTOP_DIR/$DESKTOP_FILE_NAME"
-echo "  Protocol:     $MIME_SCHEME"
+echo "  Binary  : $INSTALL_BIN_DIR/$BINARY_NAME"
+echo "  Desktop : $INSTALL_DESKTOP_DIR/$DESKTOP_FILE_NAME  (Linux)"
+echo "  Protocol: $MIME_SCHEME  (Linux)"
 echo
-echo "Test with:  xdg-open 'bifrost-totp://test'"
-echo "Uninstall:  ./install.sh --uninstall"
+echo "Test (Linux): xdg-open 'bifrost-totp://test'"
+echo "Uninstall   : ./install.sh --uninstall"

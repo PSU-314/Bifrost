@@ -19,10 +19,9 @@ target_include_directories(bifrost_lib PUBLIC
 )
 
 # Dependencies
-target_link_libraries(bifrost_lib PUBLIC
-    OpenSSL::SSL
-    OpenSSL::Crypto
-    Threads::Threads
+target_link_libraries(bifrost_lib
+    PUBLIC OpenSSL::Crypto Threads::Threads
+    PRIVATE OpenSSL::SSL
 )
 
 # Apply Hardening and Warnings
@@ -38,6 +37,12 @@ target_link_libraries(${PROJECT_NAME} PRIVATE bifrost::lib)
 # Apply Hardening and Warnings to binary
 set_project_warnings(${PROJECT_NAME})
 set_security_flags(${PROJECT_NAME})
+if(ipo_supported)
+    set_property(TARGET ${PROJECT_NAME} PROPERTY
+        INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+    set_property(TARGET ${PROJECT_NAME} PROPERTY
+        INTERPROCEDURAL_OPTIMIZATION_RELWITHDEBINFO TRUE)
+endif()
 
 # ---------------------------------------------------------
 # Installation Rules
@@ -45,6 +50,11 @@ set_security_flags(${PROJECT_NAME})
 # 1. Install the binary
 install(TARGETS ${PROJECT_NAME}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+
+install(DIRECTORY ${CMAKE_SOURCE_DIR}/include/
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/bifrost
+    FILES_MATCHING PATTERN "*.hpp"
 )
 
 # 2. Configure and install the desktop file
