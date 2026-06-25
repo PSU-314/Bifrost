@@ -25,14 +25,19 @@ BUILD_TYPE="Release"
 # ------------------------------------------------------------------------
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-INSTALL_BIN_DIR="$HOME/.local/bin"
-INSTALL_DESKTOP_DIR="$HOME/.local/share/applications"
-CONFIG_DIR="$HOME/.config/bifrost"
+INSTALL_PREFIX="$HOME/.local"
+INSTALL_BIN_DIR="$INSTALL_PREFIX/bin"
+INSTALL_DESKTOP_DIR="$INSTALL_PREFIX/share/applications"
+CONFIG_DIR="$HOME/.config/$PROJECT_NAME"
 
 echo "SCRIPT_DIR: $SCRIPT_DIR"
 
 log()  { echo -e "\033[1;34m[install]\033[0m $*"; }
 err()  { echo -e "\033[1;31m[error]\033[0m $*" >&2; }
+
+# ---- System Dependency Check -------------------------------------------
+command -v cmake >/dev/null 2>&1 || { err "cmake not found."; exit 1; }
+command -v pkg-config >/dev/null 2>&1 || { err "pkg-config not found."; exit 1; }
 
 # ---- Uninstall path ----------------------------------------------------
 if [[ "${1:-}" == "--uninstall" ]]; then
@@ -41,7 +46,7 @@ if [[ "${1:-}" == "--uninstall" ]]; then
     rm -f "$INSTALL_DESKTOP_DIR/$DESKTOP_FILE_NAME"
     rm -rf "$CONFIG_DIR"
     update-desktop-database "$INSTALL_DESKTOP_DIR" 2>/dev/null || true
-    log "Uninstalled. (xdg-mime default association is left as-is; another app may need to claim the scheme.)"
+    log "Uninstalled successfully."
     exit 0
 fi
 
@@ -51,33 +56,24 @@ if [[ "${1:-}" == "--clean" ]]; then
     rm -rf "$SCRIPT_DIR/$BUILD_DIR"
 fi
 
-# ---- Sanity checks ---------------------------------------------------------
-command -v cmake >/dev/null 2>&1 || { err "cmake not found. Install it first (sudo pacman -S cmake)."; exit 1; }
-command -v xdg-mime >/dev/null 2>&1 || { err "xdg-mime not found. Install it first (sudo pacman -S xdg-utils)."; exit 1; }
-
-if [[ ! -f "$SCRIPT_DIR/CMakeLists.txt" ]]; then
-    err "No CMakeLists.txt found in $SCRIPT_DIR. Run this script from the project root."
-    exit 1
-fi
-
-if [[ ! -f "$SCRIPT_DIR/$DESKTOP_FILE_NAME" ]]; then
-    err "Desktop file '$DESKTOP_FILE_NAME' not found in $SCRIPT_DIR. Adjust DESKTOP_FILE_NAME at the top of this script."
-    exit 1
-fi
-
 # ---- Build -------------------------------------------------------------
-log "Configuring CMake build ($BUILD_TYPE) in $BUILD_DIR/ ..."
-cmake -S "$SCRIPT_DIR" -B "$SCRIPT_DIR/$BUILD_DIR" -DCMAKE_BUILD_TYPE="$BUILD_TYPE"
+log "Configuring CMake build ($BUILD_TYPE)..."
+cmake -S "$SCRIPT_DIR" -B "$SCRIPT_DIR/$BUILD_DIR" \
+    -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
+    -DCMAKE_INSTALL_PREFIX="$INSTALL_PREFIX"
 
 log "Building $PROJECT_NAME..."
 cmake --build "$SCRIPT_DIR/$BUILD_DIR" --parallel "$(nproc)"
 
-BUILT_BINARY="$SCRIPT_DIR/$BUILD_DIR/$BINARY_NAME"
+BUILT_BINARY="$SCRIPT_DIR/$BUILD_DIR/src/$BINARY_NAME"
 if [[ ! -f "$BUILT_BINARY" ]]; then
     err "Expected built binary at $BUILT_BINARY but it wasn't found."
     err "Check that BINARY_NAME matches your CMake target's output name."
     exit 1
 fi
+
+log "Installing $PROJECT_NAME (Binaries & Desktop file)"
+cmake --install "$SCRIPT_DIR/$BUILD_DIR"
 
 # ---- Install binary ---------------------------------------------------
 log "Installing binary to $INSTALL_BIN_DIR ..."
@@ -86,8 +82,7 @@ install -m 755 "$BUILT_BINARY" "$INSTALL_BIN_DIR/$BINARY_NAME"
 
 # ---- Install certificates ---------------------------------------------
 log "Installing certificates to $CONFIG_DIR/certs ..."
-
-install -d -m 744 "$CONFIG_DIR/certs"
+install -d -m 700 "$CONFIG_DIR/certs"
 
 for cert in "$SCRIPT_DIR/certs/"*.crt "$SCRIPT_DIR/certs/"*.pem; do
     if [[ -f "$cert" ]]; then
@@ -101,26 +96,26 @@ for key in "$SCRIPT_DIR/certs/"*.key; do
     fi
 done
 
-# ---- Install desktop file (with path rewritten to the installed binary) ---
-log "Installing desktop file to $INSTALL_DESKTOP_DIR ..."
-mkdir -p "$INSTALL_DESKTOP_DIR"
-
-# Rewrite the Exec= line so it points at the installed binary location,
-# regardless of what path was hardcoded in the source .desktop file.
-sed -e "s|^Exec=.*|Exec=$INSTALL_BIN_DIR/$BINARY_NAME %u|" \
-    "$SCRIPT_DIR/$DESKTOP_FILE_NAME" > "$INSTALL_DESKTOP_DIR/$DESKTOP_FILE_NAME"
-
-chmod 644 "$INSTALL_DESKTOP_DIR/$DESKTOP_FILE_NAME"
-
-# ---- Validate desktop file (best-effort) -------------------------------
-if command -v desktop-file-validate >/dev/null 2>&1; then
-    log "Validating desktop file..."
-    desktop-file-validate "$INSTALL_DESKTOP_DIR/$DESKTOP_FILE_NAME" || true
-fi
+# # ---- Install desktop file (with path rewritten to the installed binary) ---
+# log "Installing desktop file to $INSTALL_DESKTOP_DIR ..."
+# mkdir -p "$INSTALL_DESKTOP_DIR"
+#
+# # Rewrite the Exec= line so it points at the installed binary location,
+# # regardless of what path was hardcoded in the source .desktop file.
+# sed -e "s|^Exec=.*|Exec=$INSTALL_BIN_DIR/$BINARY_NAME %u|" \
+#     "$SCRIPT_DIR/$DESKTOP_FILE_NAME" > "$INSTALL_DESKTOP_DIR/$DESKTOP_FILE_NAME"
+#
+# chmod 644 "$INSTALL_DESKTOP_DIR/$DESKTOP_FILE_NAME"
+#
+# # ---- Validate desktop file (best-effort) -------------------------------
+# if command -v desktop-file-validate >/dev/null 2>&1; then
+#     log "Validating desktop file..."
+#     desktop-file-validate "$INSTALL_DESKTOP_DIR/$DESKTOP_FILE_NAME" || true
+# fi
 
 # ---- Refresh desktop database and register protocol -----------------------
 log "Refreshing desktop database..."
-update-desktop-database "$INSTALL_DESKTOP_DIR" 2>/dev/null || true
+update-desktop-database "$INSTALL_PREFIX/share/applications" 2>/dev/null || true
 
 log "Registering $MIME_SCHEME -> $DESKTOP_FILE_NAME as default handler..."
 xdg-mime default "$DESKTOP_FILE_NAME" "$MIME_SCHEME"

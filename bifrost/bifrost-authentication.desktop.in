@@ -1,8 +1,8 @@
 [Desktop Entry]
-Version=1.0
+Version=2.0
 Type=Application
 Name=Bifrost Authentication
-Exec=<WILL BE CHANGED DURING INSTALLATION>
+Exec=@CMAKE_INSTALL_PREFIX@/@CMAKE_INSTALL_BINDIR@/bifrost %u
 Icon=utilities-terminal
 Terminal=false
 NoDisplay=true
