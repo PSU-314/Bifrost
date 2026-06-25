@@ -2,10 +2,14 @@
 bifrost/build/
 bifrost/test/
 bifrost/certs/
+bifrost/bifrost.md
 login-server/utils/__pycache__/
 login-server/bifrost.db
 login-server/pki/
 build/
+
+tls/
+pki/
 
 pki/client/
 pki/server/
