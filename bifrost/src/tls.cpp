@@ -26,15 +26,18 @@
 #include <tls.hpp>
 #include <utility.hpp>
 
-// ─── Exception helper
-// ─────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Exception helper
+// ---------------------------------------------------------------------------
 
+// Drain the OpenSSL error queue into a single runtime_error message.
+// Entries are chained with " <- " to show the full call stack.
 void throw_ssl_error(const std::string &context) {
     std::string msg = context;
-    unsigned long err;
-    bool first = true;
     char buf[256];
+    bool first = true;
 
+    unsigned long err;
     while ((err = ERR_get_error()) != 0) {
         ERR_error_string_n(err, buf, sizeof(buf));
         msg += first ? ": " : " <- ";
@@ -47,22 +50,26 @@ void throw_ssl_error(const std::string &context) {
     throw std::runtime_error(msg);
 }
 
-// ─── SSL_CTX factory
-// ──────────────────────────────────────────────────────────
-SSL_CTX *create_client_ctx(const fs::path ca_cert, const fs::path client_chain,
-                           const fs::path client_key) {
+// ---------------------------------------------------------------------------
+// SSL_CTX factory
+// ---------------------------------------------------------------------------
+
+// Build a fully-hardened client context.  Takes fs::path by const-ref so
+// callers can pass Paths::rootCACert() etc. directly without a decay to char*.
+SSL_CTX *create_client_ctx(const fs::path &ca_cert,
+                           const fs::path &client_chain,
+                           const fs::path &client_key) {
     SSL_CTX *ctx = SSL_CTX_new(TLS_client_method());
     if (!ctx)
         throw_ssl_error("SSL_CTX_new");
 
-    // ── Version floor: TLS 1.2 ───────────────────────────────────────────────
+    // ── Version floor/ceiling: TLS 1.2–1.3 ─────────────────────────────────
     if (SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION) != 1)
         throw_ssl_error("set_min_proto_version");
-
     if (SSL_CTX_set_max_proto_version(ctx, TLS1_3_VERSION) != 1)
         throw_ssl_error("set_max_proto_version");
 
-    // ── Cipher suite pinning (TLS 1.2) ───────────────────────────────────────
+    // ── TLS 1.2 cipher pinning ──────────────────────────────────────────────
     if (SSL_CTX_set_cipher_list(ctx, "ECDHE-ECDSA-AES256-GCM-SHA384:"
                                      "ECDHE-RSA-AES256-GCM-SHA384:"
                                      "ECDHE-ECDSA-AES128-GCM-SHA256:"
@@ -71,21 +78,20 @@ SSL_CTX *create_client_ctx(const fs::path ca_cert, const fs::path client_chain,
                                      "ECDHE-RSA-CHACHA20-POLY1305") != 1)
         throw_ssl_error("set_cipher_list");
 
-    // ── TLS 1.3 suites ───────────────────────────────────────────────────────
+    // ── TLS 1.3 cipher suites ───────────────────────────────────────────────
     if (SSL_CTX_set_ciphersuites(ctx, "TLS_AES_256_GCM_SHA384:"
                                       "TLS_CHACHA20_POLY1305_SHA256:"
                                       "TLS_AES_128_GCM_SHA256") != 1)
         throw_ssl_error("set_ciphersuites");
 
-    // ── Server certificate verification ──────────────────────────────────────
+    // ── Server certificate verification ─────────────────────────────────────
     if (SSL_CTX_load_verify_locations(ctx, ca_cert.c_str(), nullptr) != 1)
         throw_ssl_error("load_verify_locations (root CA)");
 
     SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, nullptr);
     SSL_CTX_set_verify_depth(ctx, 2);
 
-    // ── Client certificate (mTLS)
-    // ─────────────────────────────────────────────
+    // ── Client certificate (mTLS) ────────────────────────────────────────────
     if (SSL_CTX_use_certificate_chain_file(ctx, client_chain.c_str()) != 1)
         throw_ssl_error("use_certificate_chain_file (client chain)");
 
@@ -96,21 +102,20 @@ SSL_CTX *create_client_ctx(const fs::path ca_cert, const fs::path client_chain,
     if (SSL_CTX_check_private_key(ctx) != 1)
         throw_ssl_error("check_private_key (client)");
 
-    // ── ECDH curve selection
-    // ──────────────────────────────────────────────────
+    // ── ECDH curve selection ─────────────────────────────────────────────────
     if (SSL_CTX_set1_curves_list(ctx, "X25519:P-256:P-384") != 1)
         throw_ssl_error("set1_curves_list");
 
-    // ── Security options
-    // ──────────────────────────────────────────────────────
-    SSL_CTX_set_options(ctx, SSL_OP_NO_TICKET);
-    SSL_CTX_set_options(ctx, SSL_OP_NO_COMPRESSION);
+    // ── Security options ─────────────────────────────────────────────────────
+    // Disable session tickets (stateless resumption) and TLS compression.
+    SSL_CTX_set_options(ctx, SSL_OP_NO_TICKET | SSL_OP_NO_COMPRESSION);
 
     return ctx;
 }
 
-// ─── Raw TCP connection
-// ───────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Raw TCP connection
+// ---------------------------------------------------------------------------
 
 int connect_tcp(const std::string &host, uint16_t port) {
     addrinfo hints{}, *res = nullptr;
@@ -140,8 +145,9 @@ int connect_tcp(const std::string &host, uint16_t port) {
     return fd;
 }
 
-// ─── TLS handshake + hostname verification
-// ────────────────────────────────────
+// ---------------------------------------------------------------------------
+// TLS handshake + hostname verification
+// ---------------------------------------------------------------------------
 
 SSL *tls_connect(SSL_CTX *ctx, int tcp_fd, const std::string &hostname,
                  ConnContext &connCtx) {
@@ -149,9 +155,11 @@ SSL *tls_connect(SSL_CTX *ctx, int tcp_fd, const std::string &hostname,
     if (!ssl)
         throw_ssl_error("SSL_new");
 
+    // SNI extension — tells the server which virtual host we want.
     if (SSL_set_tlsext_host_name(ssl, hostname.c_str()) != 1)
         throw_ssl_error("SSL_set_tlsext_host_name (SNI)");
 
+    // Configure hostname / IP verification before the handshake.
     X509_VERIFY_PARAM *vpm = SSL_get0_param(ssl);
     X509_VERIFY_PARAM_set_hostflags(vpm, X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
 
@@ -162,10 +170,12 @@ SSL *tls_connect(SSL_CTX *ctx, int tcp_fd, const std::string &hostname,
 
     if (is_ip) {
         if (X509_VERIFY_PARAM_set1_ip_asc(vpm, hostname.c_str()) != 1)
-            throw_ssl_error("X509_VERIFY_PARAM_set1_ip_asc failed");
-    } else if (X509_VERIFY_PARAM_set1_host(vpm, hostname.c_str(),
-                                           hostname.size()) != 1)
-        throw_ssl_error("X509_VERIFY_PARAM_set1_host");
+            throw_ssl_error("X509_VERIFY_PARAM_set1_ip_asc");
+    } else {
+        if (X509_VERIFY_PARAM_set1_host(vpm, hostname.c_str(),
+                                        hostname.size()) != 1)
+            throw_ssl_error("X509_VERIFY_PARAM_set1_host");
+    }
 
     if (SSL_set_fd(ssl, tcp_fd) != 1)
         throw_ssl_error("SSL_set_fd");
@@ -176,11 +186,13 @@ SSL *tls_connect(SSL_CTX *ctx, int tcp_fd, const std::string &hostname,
     std::cout << "[TLS] Version   : " << SSL_get_version(ssl) << "\n";
     std::cout << "[TLS] Cipher    : " << SSL_get_cipher(ssl) << "\n";
 
+    // SSL_connect already runs hostname verification when SSL_VERIFY_PEER is
+    // set; this redundant check is a belt-and-suspenders safeguard.
     long verify_result = SSL_get_verify_result(ssl);
     if (verify_result != X509_V_OK) {
         SSL_free(ssl);
         throw std::runtime_error(
-            std::string("Server cert verification failed: ") +
+            std::string("server cert verification failed: ") +
             X509_verify_cert_error_string(verify_result));
     }
 
@@ -193,119 +205,136 @@ SSL *tls_connect(SSL_CTX *ctx, int tcp_fd, const std::string &hostname,
         X509_free(server_cert);
     }
 
+    // Derive the exporter secret via RFC 5705 / RFC 8446 §7.5.  Both client
+    // and server call export_keying_material with the same label and receive
+    // identical material, independent of the TLS version.
     connCtx.exporterSecret.resize(EXPORTER_SECRET_SIZE);
     if (SSL_export_keying_material(
             ssl, connCtx.exporterSecret.data(), EXPORTER_SECRET_SIZE,
             EXPORTER_SECRET_LABEL.data(), EXPORTER_SECRET_LABEL.size(), nullptr,
             0, 0) != 1)
-        throw_ssl_error(
-            "SSL_export_keying_material failed to extract the exporter secret");
+        throw_ssl_error("SSL_export_keying_material");
 
     return ssl;
 }
 
-// ─── Secure send / recv
-// ───────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Secure send / recv
+// ---------------------------------------------------------------------------
 
+// Loop until all len bytes are sent; handles short SSL_write returns.
 void tls_send(SSL *ssl, const void *data, size_t len) {
     if (len > static_cast<size_t>(std::numeric_limits<int>::max()))
         throw std::runtime_error(
-            "tls_send: payload exceeds SSL_write's int length limit");
+            "tls_send: payload exceeds SSL_write int limit");
 
     size_t sent = 0;
     while (sent < len) {
         int chunk = static_cast<int>(std::min(
             len - sent, static_cast<size_t>(std::numeric_limits<int>::max())));
         int n = SSL_write(ssl, static_cast<const char *>(data) + sent, chunk);
-        if (n <= 0) {
-            int err = SSL_get_error(ssl, n);
-            throw_ssl_error("SSL_write failed : " + std::to_string(err));
-        }
+        if (n <= 0)
+            throw_ssl_error("SSL_write failed: " +
+                            std::to_string(SSL_get_error(ssl, n)));
         sent += static_cast<size_t>(n);
     }
 }
 
+// Single SSL_read up to max_bytes.  Returns only bytes actually received.
 std::string tls_recv(SSL *ssl, size_t max_bytes) {
     if (max_bytes > static_cast<size_t>(std::numeric_limits<int>::max()))
         throw std::runtime_error(
-            "tls_recv: max_bytes exceeds SSL_read's int length limit");
+            "tls_recv: max_bytes exceeds SSL_read int limit");
 
     std::string buf(max_bytes, '\0');
     int n = SSL_read(ssl, buf.data(), static_cast<int>(max_bytes));
     if (n <= 0) {
         int err = SSL_get_error(ssl, n);
         if (err == SSL_ERROR_ZERO_RETURN)
-            throw std::runtime_error(
-                "SSL_read: peer closed connection (close_notify received)");
-        throw_ssl_error("SSL_read failed : " + std::to_string(err));
+            throw std::runtime_error("SSL_read: peer closed connection");
+        throw_ssl_error("SSL_read failed: " + std::to_string(err));
     }
     buf.resize(static_cast<size_t>(n));
     return buf;
 }
 
-// ─── Teardown
-// ─────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Teardown
+// ---------------------------------------------------------------------------
 
+// Two-phase shutdown per RFC 8446 §6.1: send close_notify, wait for peer's.
+// If the second call fails we log a warning but do not throw — the connection
+// is already logically closed.
 void tls_shutdown(SSL *ssl, int tcp_fd) {
     int ret = SSL_shutdown(ssl);
     if (ret == 0) {
         ret = SSL_shutdown(ssl);
         if (ret < 0) {
             int err = SSL_get_error(ssl, ret);
-            std::cerr << "TLS Shutdown incomplete. SSL error: " << err << "\n";
+            std::cerr << "[TLS] shutdown incomplete, SSL error: " << err
+                      << "\n";
         }
     }
     SSL_free(ssl);
     close(tcp_fd);
 }
 
-// ─── Registration helpers
-// ─────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Registration helpers
+// ---------------------------------------------------------------------------
 
 ServerRegData fetchServerRegData(SSL *ssl, int tcp_fd, const std::string &host,
                                  const std::string &path) {
-    std::stringstream requestStream;
-    requestStream << "GET " << path << " HTTP/1.1\r\n";
-    requestStream << "Host: " << host << "\r\n";
-    requestStream << "Connection: close\r\n\r\n";
-    auto request = requestStream.str();
+    // Build a minimal HTTP/1.1 GET; Connection: close tells the server we
+    // do not want keep-alive so it sends a close_notify after the response.
+    std::string request = "GET " + path +
+                          " HTTP/1.1\r\n"
+                          "Host: " +
+                          host +
+                          "\r\n"
+                          "Connection: close\r\n\r\n";
 
-    tls_send(ssl, request.c_str(), request.length());
+    tls_send(ssl, request.c_str(), request.size());
 
     std::string resp = tls_recv(ssl, 4096);
 
     size_t body_pos = resp.find("\r\n\r\n");
     if (body_pos == std::string::npos) {
         tls_shutdown(ssl, tcp_fd);
-        throw std::runtime_error("Server response missing HTTP delimiter");
+        throw std::runtime_error(
+            "fetchServerRegData: missing HTTP header delimiter");
     }
     std::string body = resp.substr(body_pos + 4);
 
     auto params = parseURLParams(body, '&', '=');
-    if (!params.contains("PW_KEY") || !params.contains("ACC_INFO")) {
-        throw std::runtime_error("Server response had missing fields. Body:\n" +
-                                 body);
-    }
+    if (!params.contains("PW_KEY") || !params.contains("ACC_INFO"))
+        throw std::runtime_error(
+            "fetchServerRegData: missing required fields in body:\n" + body);
 
+    // Decode the hex-encoded key and wrap it immediately in SecureBytes so
+    // the plain Bytes copy is wiped as soon as it goes out of scope.
     auto pwkey_bytes = hexToBytes(params["PW_KEY"]);
     SecureBytes pwkey(pwkey_bytes);
     OPENSSL_cleanse(pwkey_bytes.data(), pwkey_bytes.size());
+
     return {pwkey.clone(), std::string(params["ACC_INFO"])};
 }
 
-ConnInfo getConnInfo(const std::string_view &serverArgs) {
+ConnInfo getConnInfo(std::string_view serverArgs) {
     if (!serverArgs.starts_with(BIFROST_PROTOCOL))
-        throw std::runtime_error("Trying to connect with an invalid protocol");
+        throw std::runtime_error("getConnInfo: invalid protocol in URL");
 
     std::string_view urlParams = serverArgs.substr(BIFROST_PROTOCOL.size());
     auto params = parseURLParams(urlParams);
+
     if (!params.contains("host") || !params.contains("port"))
-        throw std::runtime_error("Given URL for registration does not contain "
-                                 "required connection information");
+        throw std::runtime_error("getConnInfo: URL missing 'host' or 'port'");
 
     std::string host_raw(params["host"]);
     std::string portstr(params["port"]);
 
+    // The "host" param may carry a path suffix (e.g.
+    // "server.example/signup/42").
     std::string host, path;
     size_t slash_pos = host_raw.find('/');
     if (slash_pos != std::string::npos) {
@@ -318,13 +347,14 @@ ConnInfo getConnInfo(const std::string_view &serverArgs) {
 
     auto port_ull = std::stoull(portstr, nullptr, 10);
     if (port_ull > UINT16_MAX)
-        throw std::runtime_error("Given URL for registration does not contain "
-                                 "a valid port for connection");
+        throw std::runtime_error("getConnInfo: port out of range");
 
     return {host, static_cast<uint16_t>(port_ull), path};
 }
 
 Key registerBifrost(const ConnInfo &connInfo) {
+    // These calls are safe to repeat and have been required since OpenSSL 1.1.0
+    // for builds that don't auto-initialise.
     SSL_load_error_strings();
     OpenSSL_add_ssl_algorithms();
 
@@ -340,18 +370,16 @@ Key registerBifrost(const ConnInfo &connInfo) {
                                 Paths::privKey());
         fd = connect_tcp(connInfo.host, connInfo.port);
         ssl = tls_connect(ctx, fd, connInfo.host, connCtx);
-        // exporterSecret is now populated by tls_connect via
-        // SSL_export_keying_material
+        // connCtx.exporterSecret is now populated by tls_connect.
 
-        // BUG 1+2 FIX: pass connInfo.path so the correct GET path is sent
         regData = fetchServerRegData(ssl, fd, connInfo.host, connInfo.path);
 
-        auto cert = SSL_get0_peer_certificate(ssl);
+        auto *cert = SSL_get0_peer_certificate(ssl);
         newKey = KeyStore::buildKey(cert);
         newKey.accinfo = regData.ACC_INFO;
 
-        // BUG 5 FIX: TOTP_HKDF_INFO is now 16 bytes (no null terminator) —
-        // defined via string_view in tls.hpp.  Python passes the same 16 bytes.
+        // Derive the final TOTP key: HKDF(exporterSecret, serverKey, info).
+        // TOTP_HKDF_INFO is exactly 16 bytes (no null terminator) per tls.hpp.
         hkdf_sha256(connCtx.exporterSecret, regData.KEY, TOTP_HKDF_INFO,
                     TOTP_KEY_LEN, newKey.secret);
 
@@ -366,7 +394,7 @@ Key registerBifrost(const ConnInfo &connInfo) {
         if (fd >= 0)
             close(fd);
         SSL_CTX_free(ctx);
-        throw std::runtime_error("Could not register bifrost with server");
+        throw std::runtime_error("registerBifrost: registration failed");
     }
 
     SSL_CTX_free(ctx);

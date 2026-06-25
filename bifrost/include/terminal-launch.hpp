@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <string_view>
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -11,21 +12,21 @@
 #include <unistd.h>
 #endif
 
-const std::string SENTINEL_FLAG = "--__in_terminal__";
+// Checked by main() to detect re-entry after terminal launch.
+// Defined as string_view rather than a C-string macro so SENTINEL_FLAG.c_str()
+// at the call site is explicit and string comparisons work without strlen.
+inline constexpr std::string_view SENTINEL_FLAG{"--__in_terminal__"};
 
-// ---------------------------------------------------------------------
-// Resolve the path to the currently running executable.
-// ---------------------------------------------------------------------
+// Resolve the absolute path of the currently running executable.
+// Throws std::runtime_error on failure (platform API error or buffer too
+// small).
 std::string getSelfPath();
 
-// ---------------------------------------------------------------------
-// Single-quote-escape a string for safe embedding inside a 'sh -c' arg.
-// Standard technique: close quote, insert escaped quote, reopen quote.
-// ---------------------------------------------------------------------
+// Single-quote–escape a string for safe embedding inside a POSIX 'sh -c' arg.
+// Technique: close quote, emit escaped quote, reopen quote.
 std::string shQuote(const std::string &s);
 
-// ---------------------------------------------------------------------
-// Launch the current executable inside a visible terminal window,
-// re-invoking it with SENTINEL_FLAG + the original argv forwarded.
-// ---------------------------------------------------------------------
+// Re-launch the current process inside a visible terminal window, passing
+// SENTINEL_FLAG as argv[1] followed by the original arguments.
+// Never returns on success (execlp / CreateProcess + exit).
 void launchInTerminal(const std::string &selfPath, int argc, char **argv);

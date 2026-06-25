@@ -1,7 +1,7 @@
 #pragma once
 
-#include <assert.h>
 #include <bifrost.hpp>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -14,17 +14,30 @@
 #include <openssl/x509.h>
 #include <openssl/x509v3.h>
 #include <securebytes.hpp>
+#include <string>
 #include <unordered_map>
 #include <utility.hpp>
 #include <vector>
 
-#define KEY_STORE_ENC_KEY_SIZE 32
-#define ENC_BLOB_NONCE_SIZE 12
-#define ENC_BLOB_TAG_SIZE 16
-#define PBKDF2_N_ITERATIONS 310000
-#define PBKDF2_SALT_SIZE 16
-const Bytes KEY_STORE_SIGNATURE{0x42, 0x4B, 0x53, 0x4D, 0x00, 0x01, 0x00, 0x02};
+// ---------------------------------------------------------------------------
+// Encryption constants — typed so the compiler enforces units at call sites.
+// ---------------------------------------------------------------------------
+inline constexpr size_t KEY_STORE_ENC_KEY_SIZE = 32;
+inline constexpr size_t ENC_BLOB_NONCE_SIZE = 12; // AES-GCM 96-bit nonce
+inline constexpr size_t ENC_BLOB_TAG_SIZE = 16;   // AES-GCM 128-bit tag
+inline constexpr int PBKDF2_N_ITERATIONS = 310'000;
+inline constexpr size_t PBKDF2_SALT_SIZE = 16;
 
+// Magic bytes prepended to the plaintext before encryption so decryption can
+// detect a wrong key or corrupt file before returning garbage data.
+// Version field encodes the on-disk format version (currently v1, v2).
+inline const Bytes KEY_STORE_SIGNATURE{0x42, 0x4B, 0x53, 0x4D,
+                                       0x00, 0x01, 0x00, 0x02};
+
+// ---------------------------------------------------------------------------
+// Key — holds everything we need to generate and display a TOTP for one
+// registered account.  Non-copyable because it owns a SecureBytes secret.
+// ---------------------------------------------------------------------------
 struct Key {
         std::string accinfo;
         Bytes fingerprint;
@@ -37,16 +50,20 @@ struct Key {
         Key &operator=(const Key &) = delete;
         Key(Key &&) noexcept = default;
         Key &operator=(Key &&) noexcept = default;
-
         ~Key() = default;
 
+        // Serialisation: length-prefixed TLV format.
         size_t size() const;
         Bytes serialize() const;
         static Key deserialize(const Bytes &data);
 };
 
+// ---------------------------------------------------------------------------
+// EncryptedBlob — the on-disk envelope for an AES-256-GCM-encrypted KeyStore.
+// Layout: [version:1][nonce:12][cipherSize:4][ciphertext:N][tag:16]
+// ---------------------------------------------------------------------------
 struct EncryptedBlob {
-        uint8_t version = 1;
+        uint8_t version{1};
         Bytes nonce;
         Bytes ciphertext;
         Bytes tag;
@@ -56,34 +73,58 @@ struct EncryptedBlob {
         static EncryptedBlob deserialize(const Bytes &data);
 };
 
+// ---------------------------------------------------------------------------
+// KeyStore — static singleton that owns all registered Keys in memory and on
+// disk.  Indexed by UKID (SHA-256 of accinfo || fingerprint).
+// ---------------------------------------------------------------------------
 class KeyStore {
-    private:
         static SecureBytes _encryptionKey;
         static SecureBytes _salt;
         static std::unordered_map<Bytes, Key, BytesHash> _store;
 
     public:
+        // Initialise from the password: derive the encryption key, then load
+        // and decrypt the on-disk store if it already exists.
         static void init(std::string &password);
+
+        // Number of entries currently held in memory.
         static size_t size();
+
+        // ── Certificate helpers
+        // ──────────────────────────────────────────────────
         static Bytes computeFingerprint(X509 *cert);
         static std::string extractCN(X509_NAME *name);
         static std::vector<std::string> extractSANs(X509 *cert);
+
+        // Populate fingerprint / CN / SANs from a certificate (no secret or
+        // accinfo; callers fill those in before calling store()).
         static Key buildKey(X509 *cert);
 
+        // ── Mutation
+        // ─────────────────────────────────────────────────────────────
         static void store(X509 *cert, const std::string &accinfo,
                           SecureBytes &&secret);
+        // Takes ownership of key via move; existing entries with the same UKID
+        // are overwritten.
         static void store(Key &key);
+        static void erase(const Bytes &ukid);
 
+        // ── Key identifiers
+        // ────────────────────────────────────────────────────── UKID =
+        // SHA-256(accinfo || fingerprint) — stable, unique per registration.
         static Bytes getUKID(const Key &key);
-        static const Key *lookupByUKID(const Bytes &UKID);
+
+        // ── Lookup
+        // ───────────────────────────────────────────────────────────────
+        static const Key *lookupByUKID(const Bytes &ukid);
         static std::vector<const Key *> lookupByFG(const Bytes &fingerprint);
         static std::vector<const Key *> lookupByCN(const std::string &cn);
         static std::vector<const Key *>
         lookupByAccInfo(const std::string &accinfo);
-
         static std::vector<const Key *> getAllKeys();
 
-        static void erase(const Bytes &UKID);
+        // ── Persistence
+        // ──────────────────────────────────────────────────────────
         static Bytes serialize();
         static void deserialize(const Bytes &data);
         static EncryptedBlob encryptStore();

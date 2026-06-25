@@ -16,16 +16,21 @@ namespace fs = std::filesystem;
 using Byte = uint8_t;
 using Bytes = std::vector<Byte>;
 
-#define DEFAULT_KEYFILE "totp-secrets.keys"
-#define APP_DIR_NAME "bifrost"
-#define CERTS_DIR_NAME "certs"
+// Application directory and file name constants.
+// Centralised here so every TU sees the same strings without macro hygiene
+// concerns.
+inline constexpr std::string_view APP_DIR_NAME{"bifrost"};
+inline constexpr std::string_view CERTS_DIR_NAME{"certs"};
+inline constexpr std::string_view DEFAULT_KEYFILE{"totp-secrets.keys"};
+inline constexpr std::string_view ROOT_CA_CERT{"root-ca.crt"};
+inline constexpr std::string_view BIFROST_CERT_CHAIN{"bifrost-chain.pem"};
+inline constexpr std::string_view BIFROST_KEY{"bifrost.key"};
+inline constexpr std::string_view BIFROST_PROTOCOL{"bifrost-totp://"};
 
-#define ROOT_CA_CERT "root-ca.crt"
-#define BIFROST_CERT_CHAIN "bifrost-chain.pem"
-#define BIFROST_KEY "bifrost.key"
-
-const std::string BIFROST_PROTOCOL = "bifrost-totp://";
-
+// ---------------------------------------------------------------------------
+// Paths — static helper that resolves all well-known filesystem locations.
+// Converted macros to constexpr string_views; operator/ handles the join.
+// ---------------------------------------------------------------------------
 class Paths {
     private:
         inline static std::string _keyfile;
@@ -41,11 +46,7 @@ class Paths {
 
     public:
         static void init() {
-            auto cnfgdir = configDir();
-            auto crtdir = certsDir();
-            if (!fs::exists(cnfgdir))
-                fs::create_directories(cnfgdir);
-            if (!fs::exists(crtdir) || !fs::exists(rootCACert()) ||
+            if (!fs::exists(certsDir()) || !fs::exists(rootCACert()) ||
                 !fs::exists(certChain()) || !fs::exists(privKey()))
                 throw std::runtime_error("Missing Certs");
 
