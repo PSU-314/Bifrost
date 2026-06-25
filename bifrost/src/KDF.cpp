@@ -47,9 +47,10 @@ void hkdf_sha256(const SecureBytes &ikm, const SecureBytes &salt,
 void pbkdf2_sha256(const SecureBytes &password, const SecureBytes &salt,
                    const int n_iterations, SecureBytes &derived) {
     derived.resize(SHA256_DIGEST_LENGTH);
-    if (PKCS5_PBKDF2_HMAC((const char *)password.data(), (int)password.size(),
-                          salt.data(), (int)salt.size(), n_iterations,
-                          EVP_sha256(), (int)derived.size(),
+    if (PKCS5_PBKDF2_HMAC(reinterpret_cast<const char *>(password.data()),
+                          static_cast<int>(password.size()), salt.data(),
+                          static_cast<int>(salt.size()), n_iterations,
+                          EVP_sha256(), static_cast<int>(derived.size()),
                           derived.data()) != 1)
         throw std::runtime_error("PBKDF2 Failed");
 }

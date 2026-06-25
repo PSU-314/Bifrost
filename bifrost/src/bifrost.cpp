@@ -27,7 +27,7 @@ namespace fs = std::filesystem;
 void printProgressBar(float percentage, int totalLen) {
     percentage = std::clamp(percentage, 0.0f, 1.0f);
     std::cout << "[";
-    int nFilled = static_cast<int>(percentage * totalLen);
+    int nFilled = static_cast<int>(percentage * static_cast<float>(totalLen));
     for (int i = 0; i < nFilled; i++)
         std::cout << "#";
     for (int i = 0; i < totalLen - nFilled; i++)
@@ -131,7 +131,7 @@ int main(int argc, char **argv) {
             std::cout << "    TOTP: " << std::setfill('0')
                       << std::setw(OTP_SIZE) << otp << std::endl;
             std::cout << "    Validity: " << validity << "s\n    ";
-            printProgressBar((float)validity / TIME_WINDOW, 30);
+            printProgressBar(static_cast<float>(validity) / TIME_WINDOW, 30);
             std::cout << std::endl << std::endl;
         }
         std::cout << std::endl;

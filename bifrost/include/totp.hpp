@@ -1,5 +1,6 @@
 #pragma once
 #include <bifrost.hpp>
+#include <cstdint>
 #include <securebytes.hpp>
 #include <utility.hpp>
 
@@ -9,11 +10,11 @@
 #define TOTP_DIGEST_SIZE 20
 
 struct TOTP {
-        int otp, validity;
+        uint32_t otp, validity;
 
-        TOTP(int otp, int validity)
-            : otp(otp),
-              validity(validity) {}
+        TOTP(uint32_t _otp, uint32_t _validity)
+            : otp(_otp),
+              validity(_validity) {}
 };
 
 Bytes generate_hmac_sha1(const SecureBytes &key, const Bytes &msg);

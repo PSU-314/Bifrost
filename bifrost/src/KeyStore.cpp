@@ -6,7 +6,6 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
-#include <iomanip>
 #include <openssl/crypto.h>
 #include <openssl/evp.h>
 #include <openssl/rand.h>
@@ -95,7 +94,7 @@ Bytes EncryptedBlob::serialize() const {
     out.push_back(version);
     out.insert(out.end(), nonce.begin(), nonce.end());
 
-    uint32_t cipherSize = ciphertext.size();
+    uint32_t cipherSize = static_cast<uint32_t>(ciphertext.size());
     writeu32(out, cipherSize);
     out.insert(out.end(), ciphertext.begin(), ciphertext.end());
 
@@ -142,14 +141,15 @@ SecureBytes KeyStore::_salt;
 std::unordered_map<Bytes, Key, BytesHash> KeyStore::_store;
 
 void KeyStore::init(std::string &password) {
-    SecureBytes passwd((const Byte *)password.data(), password.size());
+    SecureBytes passwd(reinterpret_cast<const Byte *>(password.data()),
+                       password.size());
 
     _salt.resize(PBKDF2_SALT_SIZE);
     bool keyfileExists = fs::exists(Paths::keyfile());
 
     if (keyfileExists) {
         std::ifstream keyfile(Paths::keyfile(), std::ios::binary);
-        keyfile.read((char *)_salt.data(), PBKDF2_SALT_SIZE);
+        keyfile.read(reinterpret_cast<char *>(_salt.data()), PBKDF2_SALT_SIZE);
     } else
         RAND_bytes(_salt.data(), PBKDF2_SALT_SIZE);
 
@@ -177,7 +177,7 @@ Bytes KeyStore::computeFingerprint(X509 *cert) {
     unsigned int digestLen = 0;
     EVP_MD_CTX *mdctx = EVP_MD_CTX_new();
     if (!mdctx || EVP_DigestInit_ex(mdctx, EVP_sha256(), nullptr) != 1 ||
-        EVP_DigestUpdate(mdctx, der, derLen) != 1 ||
+        EVP_DigestUpdate(mdctx, der, static_cast<size_t>(derLen)) != 1 ||
         EVP_DigestFinal_ex(mdctx, digest, &digestLen) != 1) {
         if (mdctx)
             EVP_MD_CTX_free(mdctx);
@@ -313,11 +313,11 @@ Bytes KeyStore::serialize() {
     Bytes out;
     out.reserve(size());
 
-    writeu32(out, _store.size());
+    writeu32(out, static_cast<uint32_t>(_store.size()));
 
     for (const auto &[fp, key] : _store) {
         Bytes k = key.serialize();
-        uint32_t keySize = key.size();
+        uint32_t keySize = static_cast<uint32_t>(key.size());
         writeu32(out, keySize);
         out.insert(out.end(), k.begin(), k.end());
     }
@@ -373,7 +373,8 @@ EncryptedBlob KeyStore::encryptStore() {
 
     int outlen, finallen;
     if (EVP_EncryptUpdate(ctx, blob.ciphertext.data(), &outlen,
-                          plaintext.data(), plaintext.size()) != 1) {
+                          plaintext.data(),
+                          static_cast<int>(plaintext.size())) != 1) {
         EVP_CIPHER_CTX_free(ctx);
         throw std::runtime_error("EVP_EncryptInit_ex failed");
     }
@@ -437,7 +438,7 @@ void KeyStore::decryptStore(const EncryptedBlob &blob) {
             "(data corrupted, tampered, or wrong key)");
     }
 
-    plaintext.resize(outlen + finallen);
+    plaintext.resize(static_cast<size_t>(outlen + finallen));
 
     if (plaintext.size() < KEY_STORE_SIGNATURE.size() ||
         CRYPTO_memcmp(plaintext.data(), KEY_STORE_SIGNATURE.data(),

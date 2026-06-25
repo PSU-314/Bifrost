@@ -55,7 +55,7 @@ struct ServerRegData {
 // ─── Exception helper
 // ─────────────────────────────────────────────────────────
 
-static void throw_ssl_error(const std::string &context);
+void throw_ssl_error(const std::string &context);
 
 // ─── SSL_CTX factory
 // ──────────────────────────────────────────────────────────

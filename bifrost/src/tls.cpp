@@ -29,7 +29,7 @@
 // ─── Exception helper
 // ─────────────────────────────────────────────────────────
 
-static void throw_ssl_error(const std::string &context) {
+void throw_ssl_error(const std::string &context) {
     std::string msg = context;
     unsigned long err;
     bool first = true;

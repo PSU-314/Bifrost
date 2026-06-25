@@ -134,7 +134,7 @@ void launchInTerminal(const std::string &selfPath, int argc, char **argv) {
 
         // Separate argv entries: term, sep, "bash", "-c", innerCmd
         execlp(term, term, sep.c_str(), "bash", "-c", innerCmd.c_str(),
-               (char *)nullptr);
+               static_cast<char *>(nullptr));
         // execlp only returns on failure — try the next terminal
     }
 
