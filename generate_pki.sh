@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 177
 
 # 1. Clean and setup staging directories
 rm -rf pki_staging
@@ -85,5 +86,5 @@ cp pki_staging/server/server.key login-server/pki/server/server.key
 cp pki_staging/client/bifrost.key bifrost/certs/bifrost.key
 
 # # Clean up configuration file
-rm -f extensions.cnf 
+rm -rf extensions.cnf pki_staging
 echo "=== PKI Generation Complete! ==="

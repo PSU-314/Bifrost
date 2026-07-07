@@ -20,7 +20,8 @@
 #include <vector>
 
 // ---------------------------------------------------------------------------
-// Encryption constants — typed so the compiler enforces units at call sites.
+// Encryption constants — typed so the compiler enforces units at call
+// sites.
 // ---------------------------------------------------------------------------
 inline constexpr size_t KEY_STORE_ENC_KEY_SIZE = 32;
 inline constexpr size_t ENC_BLOB_NONCE_SIZE = 12; // AES-GCM 96-bit nonce
@@ -28,19 +29,13 @@ inline constexpr size_t ENC_BLOB_TAG_SIZE = 16;   // AES-GCM 128-bit tag
 inline constexpr int PBKDF2_N_ITERATIONS = 310'000;
 inline constexpr size_t PBKDF2_SALT_SIZE = 16;
 
-// Magic bytes prepended to the plaintext before encryption so decryption can
-// detect a wrong key or corrupt file before returning garbage data.
-// Version field encodes the on-disk format version (currently v1, v2).
-inline const Bytes KEY_STORE_SIGNATURE{0x42, 0x4B, 0x53, 0x4D,
-                                       0x00, 0x01, 0x00, 0x02};
-
 // ---------------------------------------------------------------------------
 // Key — holds everything we need to generate and display a TOTP for one
 // registered account.  Non-copyable because it owns a SecureBytes secret.
 // ---------------------------------------------------------------------------
 struct Key {
         std::string accinfo;
-        Bytes fingerprint;
+        Bytes fingerprint; // = SHA(Server X509 Certificate)
         std::string commonName;
         std::vector<std::string> sans;
         SecureBytes secret;
@@ -129,6 +124,7 @@ class KeyStore {
         static void deserialize(const Bytes &data);
         static EncryptedBlob encryptStore();
         static void decryptStore(const EncryptedBlob &blob);
+        // Layout: [PBKDF2_SALT_SIZE] + [EncryptedBlob]
         static void saveStore();
         static void loadStore();
 };

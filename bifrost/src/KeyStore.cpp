@@ -402,9 +402,7 @@ EncryptedBlob KeyStore::encryptStore() {
     // Prepend the magic signature so we can detect a wrong password on decrypt.
     Bytes storeSerial = serialize();
     Bytes plaintext;
-    plaintext.reserve(KEY_STORE_SIGNATURE.size() + storeSerial.size());
-    plaintext.insert(plaintext.end(), KEY_STORE_SIGNATURE.begin(),
-                     KEY_STORE_SIGNATURE.end());
+    plaintext.reserve(storeSerial.size());
     plaintext.insert(plaintext.end(), storeSerial.begin(), storeSerial.end());
 
     blob.ciphertext.resize(plaintext.size()); // GCM produces no expansion
@@ -478,18 +476,7 @@ void KeyStore::decryptStore(const EncryptedBlob &blob) {
 
     plaintext.resize(static_cast<size_t>(outlen + finallen));
 
-    // Verify the magic signature to catch a wrong password that somehow
-    // produces an otherwise valid GCM tag (e.g. all-zero key scenario).
-    if (plaintext.size() < KEY_STORE_SIGNATURE.size() ||
-        CRYPTO_memcmp(plaintext.data(), KEY_STORE_SIGNATURE.data(),
-                      KEY_STORE_SIGNATURE.size()) != 0) {
-        OPENSSL_cleanse(plaintext.data(), plaintext.size());
-        throw std::runtime_error("decryptStore: store signature missing");
-    }
-
-    Bytes serialized(plaintext.begin() +
-                         static_cast<ptrdiff_t>(KEY_STORE_SIGNATURE.size()),
-                     plaintext.end());
+    Bytes serialized(plaintext.begin(), plaintext.end());
     OPENSSL_cleanse(plaintext.data(), plaintext.size());
 
     deserialize(serialized);

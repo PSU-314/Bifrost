@@ -109,6 +109,8 @@ SSL_CTX *create_client_ctx(const fs::path &ca_cert,
     // ── Security options ─────────────────────────────────────────────────────
     // Disable session tickets (stateless resumption) and TLS compression.
     SSL_CTX_set_options(ctx, SSL_OP_NO_TICKET | SSL_OP_NO_COMPRESSION);
+    // Disable caching the master secret for session resumption
+    SSL_CTX_set_session_cache_mode(ctx, SSL_SESS_CACHE_OFF);
 
     return ctx;
 }
@@ -316,6 +318,7 @@ ServerRegData fetchServerRegData(SSL *ssl, int tcp_fd, const std::string &host,
     auto pwkey_bytes = hexToBytes(params["PW_KEY"]);
     SecureBytes pwkey(pwkey_bytes);
     OPENSSL_cleanse(pwkey_bytes.data(), pwkey_bytes.size());
+    OPENSSL_cleanse(resp.data(), resp.size());
 
     return {pwkey.clone(), std::string(params["ACC_INFO"])};
 }
