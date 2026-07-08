@@ -26,7 +26,7 @@
 inline constexpr size_t KEY_STORE_ENC_KEY_SIZE = 32;
 inline constexpr size_t ENC_BLOB_NONCE_SIZE = 12; // AES-GCM 96-bit nonce
 inline constexpr size_t ENC_BLOB_TAG_SIZE = 16;   // AES-GCM 128-bit tag
-inline constexpr int PBKDF2_N_ITERATIONS = 310'000;
+inline constexpr int PBKDF2_N_ITERATIONS = 600'000;
 inline constexpr size_t PBKDF2_SALT_SIZE = 16;
 
 // ---------------------------------------------------------------------------

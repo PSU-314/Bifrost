@@ -12,6 +12,7 @@ Flask-SQLAlchemy==3.1.1
 SQLAlchemy==2.0.51
 
 # ── Password / key derivation ─────────────────────────────────────────────────
-# argon2-cffi wraps the reference Argon2 C library via argon2-cffi-bindings.
-# argon2.low_level.hash_secret_raw() is used in app.py to derive PW_KEY.
-argon2-cffi==25.1.0
+# PW_KEY is derived via hashlib.pbkdf2_hmac("sha256", ...) in app.py's
+# _generate_pw_key() — stdlib, no external dependency required.
+# (Previously used argon2-cffi for Argon2id; removed when app.py switched
+# to PBKDF2-SHA256.)

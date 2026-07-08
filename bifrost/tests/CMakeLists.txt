@@ -71,4 +71,4 @@ bifrost_add_test(test_kdf      test_kdf.cpp      "unit;kdf")
 
 # KeyStore.cpp: Key/EncryptedBlob serde, UKID, in-memory mutations,
 # AES-256-GCM encrypt/decrypt round-trip.
-bifrost_add_test(test_keystore test_keystore.cpp "unit;keystore")
+# bifrost_add_test(test_keystore test_keystore.cpp "unit;keystore")

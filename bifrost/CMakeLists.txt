@@ -20,7 +20,7 @@ include(Hardening)
 include(GNUInstallDirs)
 
 
-option(BIFROST_BUILD_TESTS "Build the Bifrost test suite" OFF)
+option(BIFROST_BUILD_TESTS "Build the Bifrost test suite" ON)
 if (BIFROST_BUILD_TESTS)
     enable_testing()
 endif()

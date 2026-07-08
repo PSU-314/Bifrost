@@ -5,7 +5,7 @@
 <div class="card hero-card">
     <div class="page-tag">SECURE ACCESS PORTAL</div>
     <h1>Two-Factor <span class="accent">Auth</span></h1>
-    <p>X25519 key exchange + TOTP-based second factor.<br>A cryptography demo.</p>
+    <p>mTLS + HKDF key exchange with TOTP-based second factor.<br>A cryptography demo.</p>
 
     <div class="btn-row">
         <a href="{{ url_for('page_2') }}" class="btn btn-primary">SIGN UP</a>
@@ -13,6 +13,6 @@
     </div>
 
     <hr class="divider">
-    <div class="hero-badge">X25519 &nbsp;·&nbsp; HMAC-SHA1 &nbsp;·&nbsp; TOTP</div>
+    <div class="hero-badge">mTLS &nbsp;·&nbsp; HKDF-SHA256 &nbsp;·&nbsp; HMAC-SHA1 &nbsp;·&nbsp; TOTP</div>
 </div>
 {% endblock %}

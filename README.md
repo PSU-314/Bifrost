@@ -44,8 +44,8 @@ The system consists of two components:
 
 - **Mutual TLS registration** — connects to the login server using a client certificate issued by a private CA, enforcing bidirectional identity verification
 - **TLS Exporter-based key binding** — uses `SSL_export_keying_material` (RFC 5705 / RFC 8446 §7.5) to bind the TOTP secret to the TLS session, not just the password
-- **HKDF-SHA256 key derivation** — derives the final TOTP secret via HKDF (`RFC 5869`) combining the TLS exporter material and an Argon2id-derived password key
-- **AES-256-GCM encrypted KeyStore** — all TOTP secrets are stored on-disk in an AES-256-GCM encrypted file, with the encryption key derived from a master password via PBKDF2-SHA256 (310,000 iterations per OWASP 2023)
+- **HKDF-SHA256 key derivation** — derives the final TOTP secret via HKDF (`RFC 5869`) combining the TLS exporter material and a PBKDF2-SHA256-derived password key
+- **AES-256-GCM encrypted KeyStore** — all TOTP secrets are stored on-disk in an AES-256-GCM encrypted file, with the encryption key derived from a master password via PBKDF2-SHA256 (600,000 iterations per OWASP standards)
 - **SecureBytes allocator** — secrets in memory are zeroed via `OPENSSL_cleanse` on deallocation, preventing heap remnants
 - **Live TOTP display** — renders all registered accounts with their current OTP, remaining validity, and a terminal progress bar, refreshing twice per second
 - **`bifrost-totp://` custom URL scheme** — clicking a link on the signup page automatically launches the terminal and initiates registration
@@ -56,7 +56,7 @@ The system consists of two components:
 
 - **4-step web registration flow** — Signup → Key Exchange → Login → 2FA
 - **mTLS server** — a dedicated background thread accepts Bifrost client connections on port 8443, validates client certificates, and performs the HKDF derivation server-side
-- **Argon2id password key derivation** — generates `PW_KEY` from the user's password before it is used as HKDF salt
+- **PBKDF2-SHA256 password key derivation** — generates `PW_KEY` from the user's password (600,000 iterations, matching the client's local KeyStore KDF) before it is used as HKDF salt
 - **Single-use, time-limited exchange endpoints** — registration tokens expire in 5 minutes and are destroyed on first successful use
 - **TOTP verification with clock-skew tolerance** — accepts codes from the current, previous, and next 30-second windows; uses constant-time comparison to prevent timing attacks
 - **SQLite-backed user store** — via Flask-SQLAlchemy
@@ -84,7 +84,7 @@ bifrost client                login-server (mTLS, port 8443)
      │              salt = PW_KEY,
      │              info = "bifrost-totp-key")
      │
-     │  → identical 48-byte TOTP secret, never transmitted
+     │  → identical 32-byte TOTP secret, never transmitted
      ▼
 [KeyStore] secret encrypted with AES-256-GCM, key from PBKDF2(master password)
 ```
@@ -147,7 +147,8 @@ pip install -r requirements.txt
 **Dependencies installed:**
 - `Flask` 3.1.3, `Werkzeug` 3.1.7 — web framework
 - `Flask-SQLAlchemy` 3.1.1, `SQLAlchemy` 2.0.51 — ORM / SQLite
-- `argon2-cffi` 25.1.0 — Argon2id password key derivation
+
+`PW_KEY` derivation uses `hashlib.pbkdf2_hmac` from the Python standard library — no additional dependency required.
 
 > **Python 3.12 note:** The server uses a `ctypes` workaround to call `SSL_export_keying_material` directly, as `ssl.SSLSocket.export_keying_material()` was only added in Python 3.13. If you upgrade to Python 3.13+, the `ctypes` workaround in `app.py` can be replaced with the native API.
 
@@ -171,7 +172,7 @@ chmod +x install.sh
 ./install.sh --uninstall
 ```
 
-The script builds a Release binary, installs it to `~/.local/bin/bifrost`, registers the `bifrost-totp://` URL scheme via `.desktop` file (Linux), and copies certificates to `~/.config/bifrost/certs/`.
+The script builds a Release binary, performs automated testing and, if successful, installs it to `~/.local/bin/bifrost`, registers the `bifrost-totp://` URL scheme via `.desktop` file (Linux), and copies certificates to `~/.config/bifrost/certs/`.
 
 #### Option B — Manual CMake build
 
@@ -187,7 +188,7 @@ The compiled binary will be at `build/src/bifrost`.
 
 | Option | Default | Description |
 |---|---|---|
-| `BIFROST_BUILD_TESTS` | `OFF` | Build the test suite |
+| `BIFROST_BUILD_TESTS` | `ON` | Build the test suite |
 | `ENABLE_SANITIZERS` | `OFF` | Enable ASAN + UBSAN (Debug builds only) |
 
 ---
@@ -223,7 +224,7 @@ Open your browser to `http://localhost:5000` to begin.
 
 2. **Enter** a username and password. The server will:
    - Create a user record
-   - Derive a `PW_KEY` using Argon2id
+   - Derive a `PW_KEY` using PBKDF2-SHA256 
    - Generate a time-limited single-use exchange token (5-minute TTL)
    - Display a `bifrost-totp://` deep-link URI
 
@@ -258,7 +259,7 @@ The terminal will display each registered account with:
 - A visual progress bar
 - Server certificate CN and fingerprint
 
-Codes refresh every 500 ms. Press `Ctrl+C` to exit.
+Codes refresh every 30s. Press `Ctrl+C` to exit.
 
 ---
 
@@ -315,7 +316,7 @@ If any PKI file is missing, the mTLS server will not start and a warning will be
 ```
 user password
      │
-     ▼ Argon2id (time=2, mem=64MB)
+     ▼ PBKDF2-SHA256 (600,000 iterations, 16-byte salt)
   PW_KEY (16 bytes)
      │
      │   TLS Exporter Material (48 bytes)
@@ -328,12 +329,14 @@ HKDF-SHA256(ikm=exporter_material, salt=PW_KEY, info="bifrost-totp-key")
   TOTP secret (48 bytes) — stored encrypted on client, hashed on server
 ```
 
+> **Note:** The 600,000-iteration count matches `PBKDF2_N_ITERATIONS` used for the client's local KeyStore password KDF (see below), so both PBKDF2-SHA256 call sites in the system use the same OWASP-2023-baseline iteration count.
+
 **KeyStore encryption:**
 
 ```
 master password
      │
-     ▼ PBKDF2-SHA256 (310,000 iterations, 16-byte salt)
+     ▼ PBKDF2-SHA256 (600,000 iterations, 16-byte salt)
   encryption key (32 bytes)
      │
      ▼ AES-256-GCM (96-bit random nonce, 128-bit auth tag)
@@ -343,26 +346,12 @@ master password
 **Known limitations / planned improvements:**
 
 - TOTP currently uses HMAC-SHA1 (RFC 6238 default). A migration to HMAC-SHA256 is noted in the source (`// TODO: SECURITY — SHA-1 is cryptographically weak`) and requires both sides to switch simultaneously.
-- The Diffie-Hellman implementation in `login-server/utils/dh.py` uses a 50-bit prime and is explicitly marked for **demonstration/educational purposes only**. The production key exchange is performed through the TLS exporter mechanism described above.
 - `ssl.VERIFY_X509_STRICT` is currently commented out on the server (`# ctx.verify_flags = ssl.VERIFY_X509_STRICT`) due to OpenSSL 3.x compatibility considerations.
 
----
+**Fixed since the initial design:**
 
-## Contributing
-
-Contributions are welcome. Please follow these guidelines:
-
-1. **Fork** the repository and create a feature branch from `main`.
-
-2. **Code style:**
-   - C++: follow the existing style (C++20, no extensions, `-Wall -Wextra -Wpedantic`). Run with ASAN/UBSAN enabled (`-DENABLE_SANITIZERS=ON`) before submitting.
-   - Python: PEP 8. Use type hints where the existing code does.
-
-3. **Security-sensitive changes** (crypto primitives, TLS configuration, KeyStore format) require explicit justification and references to relevant RFCs or CVEs in the PR description.
-
-4. **Do not break the mTLS handshake** — both sides must agree on the HKDF label (`"bifrost-ms"`), info (`"bifrost-totp-key"`, exactly 16 bytes, no null terminator), and output length.
-
-5. Open an issue before starting large refactors or feature additions.
+- An earlier browser-based registration path (`login-server/utils/dh.py`, `exchange_endpoint()`, `page_exchange.html`) computed `shared_secret_hex` via finite-field Diffie-Hellman over a ~56-bit prime — not a cryptographically meaningful security margin. Because it wrote to the same database column as the mTLS+HKDF path, it could silently overwrite a correctly-derived secret with a trivially-breakable one whenever both endpoints were reachable. This path has been removed; `_handle_bifrost_connection` (the mTLS handler) is now the sole writer of `shared_secret_hex`.
+- `PW_KEY` derivation was switched from Argon2id to PBKDF2-SHA256 (600,000 iterations), removing the `argon2-cffi` dependency in favor of the Python standard library's `hashlib.pbkdf2_hmac`.
 
 ---
 
@@ -415,6 +404,5 @@ This project does not currently specify a license. All rights reserved by the au
 - [RFC 5869](https://datatracker.ietf.org/doc/html/rfc5869) — HMAC-based Extract-and-Expand Key Derivation Function (HKDF)
 - [RFC 5705](https://datatracker.ietf.org/doc/html/rfc5705) / [RFC 8446 §7.5](https://datatracker.ietf.org/doc/html/rfc8446#section-7.5) — TLS Keying Material Exporters
 - [OpenSSL 3.x](https://www.openssl.org/) — TLS, AES-GCM, HKDF, PBKDF2, and X.509 implementations
-- [argon2-cffi](https://argon2-cffi.readthedocs.io/) — Argon2id key derivation
 - [Flask](https://flask.palletsprojects.com/) — Python web framework
 - [System Design Handbook — How Google Authenticator Works](https://www.systemdesignhandbook.com/guides/how-google-authenticator-works-system-design/)

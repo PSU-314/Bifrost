@@ -8,6 +8,15 @@ HMAC-SHA1 construction that mirrors the original C++ implementation:
 
 This intentionally preserves backward-compatibility with the C++ version
 rather than implementing strict RFC 6238.
+
+NOTE: the "shared secret" received here is already the output of
+HKDF-SHA256(salt=PW_KEY, ikm=TLS_exporter_secret, info="bifrost-totp-key"),
+computed once in app.py's _handle_bifrost_connection() at registration time
+and mirrored by the C++ client. This module does not perform key derivation
+— it only computes HMAC-SHA1 over the already-derived secret, matching
+totp.cpp's genSample(). TOTP_DIGEST_SIZE / HMAC-SHA1 is a known, tracked
+deviation from RFC 6238 (see the TODO in totp.hpp); both sides must switch
+to HMAC-SHA256 simultaneously if that migration happens.
 """
 
 import hashlib
@@ -86,4 +95,3 @@ def verify_otp(shared_secret: bytes, user_code: str) -> bool:
 
     expected_codes = generate_otp(shared_secret)
     return any(hmac.compare_digest(user_code, expected) for expected in expected_codes)
-

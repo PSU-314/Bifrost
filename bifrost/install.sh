@@ -1,17 +1,19 @@
 #!/usr/bin/env bash
 #
-# install.sh — Build and install Bifrost (user-local, no sudo required)
+# install.sh — Build, test, and install Bifrost (user-local, no sudo required)
 #
 # What this does:
 #   1. Configures and builds the project with CMake (Release, out-of-source in build/)
-#   2. Installs the resulting binary to ~/.local/bin
-#   3. Installs the .desktop file to ~/.local/share/applications
-#   4. Refreshes the desktop database and registers the bifrost-totp:// scheme
+#   2. Runs the CTest suite and ABORTS before installing if any test fails
+#   3. Installs the resulting binary to ~/.local/bin
+#   4. Installs the .desktop file to ~/.local/share/applications
+#   5. Refreshes the desktop database and registers the bifrost-totp:// scheme
 #
 # Usage:
-#   ./install.sh            # build + install
-#   ./install.sh --clean    # wipe build/ first, then build + install
-#   ./install.sh --uninstall # remove installed files
+#   ./install.sh                    # build + test + install
+#   ./install.sh --skip-tests       # build + install, skip tests (not recommended)
+#   ./install.sh --clean            # wipe build/ first, then build + test + install
+#   ./install.sh --uninstall        # remove installed files
 
 set -euo pipefail
 
@@ -22,6 +24,7 @@ DESKTOP_FILE_NAME="bifrost-authentication.desktop"
 MIME_SCHEME="x-scheme-handler/bifrost-totp"
 BUILD_DIR="build"
 BUILD_TYPE="Release"
+RUN_TESTS=1                    # default on; --skip-tests turns it off
 # ------------------------------------------------------------------------
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -52,10 +55,21 @@ if [[ "${1:-}" == "--uninstall" ]]; then
     exit 0
 fi
 
-# ---- Optional clean ------------------------------------------------------
+# ---- Argument parsing ----------------------------------------------------
+# NOTE: this remains simple positional parsing, matching the original
+# script's style. It intentionally does NOT support combining --clean and
+# --skip-tests in one invocation (e.g. "./install.sh --clean --skip-tests"
+# will only honor --clean). If you need combinable flags, replace this block
+# with a `while getopts` or manual `while [[ $# -gt 0 ]]` loop that shifts
+# through all arguments instead of only inspecting "$1".
 if [[ "${1:-}" == "--clean" ]]; then
     log "Cleaning previous build directory..."
     rm -rf "$SCRIPT_DIR/$BUILD_DIR"
+fi
+
+if [[ "${1:-}" == "--skip-tests" ]]; then
+    RUN_TESTS=0
+    log "Skipping test suite (--skip-tests passed)."
 fi
 
 # ── Parallel job count (cross-platform) ──────────────────────────────────────
@@ -65,14 +79,36 @@ else
     JOBS="$(nproc)"
 fi
 
-# ---- Build -------------------------------------------------------------
+# ---- Configure -------------------------------------------------------------
 log "Configuring CMake build ($BUILD_TYPE)..."
+BIFROST_BUILD_TESTS_FLAG="OFF"
+if [[ $RUN_TESTS -eq 1 ]]; then
+    BIFROST_BUILD_TESTS_FLAG="ON"
+fi
+
 cmake -S "$SCRIPT_DIR" -B "$SCRIPT_DIR/$BUILD_DIR" \
     -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
-    -DCMAKE_INSTALL_PREFIX="$INSTALL_PREFIX"
+    -DCMAKE_INSTALL_PREFIX="$INSTALL_PREFIX" \
+    -DBIFROST_BUILD_TESTS="$BIFROST_BUILD_TESTS_FLAG"
 
+# ---- Build -------------------------------------------------------------
 log "Building $PROJECT_NAME..."
 cmake --build "$SCRIPT_DIR/$BUILD_DIR" --parallel "$JOBS"
+
+# ---- Test ----------------------------------------------------------------
+# This is the step that satisfies "perform tests, then continue to
+# installation": ctest's exit code is checked explicitly (relying on `set -e`
+# alone would not reliably short-circuit here since this runs inside a
+# conditional), and a non-zero exit aborts BEFORE `cmake --install` runs.
+if [[ $RUN_TESTS -eq 1 ]]; then
+    log "Running test suite..."
+    if ! ctest --test-dir "$SCRIPT_DIR/$BUILD_DIR" --output-on-failure -j "$JOBS"; then
+        err "Tests failed. Aborting install."
+        err "Re-run with --skip-tests to bypass verification (not recommended)."
+        exit 1
+    fi
+    log "All tests passed."
+fi
 
 BUILT_BINARY="$SCRIPT_DIR/$BUILD_DIR/src/$BINARY_NAME"
 if [[ ! -f "$BUILT_BINARY" ]]; then

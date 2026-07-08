@@ -52,10 +52,10 @@ install(TARGETS ${PROJECT_NAME}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
-install(DIRECTORY ${CMAKE_SOURCE_DIR}/include/
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/bifrost
-    FILES_MATCHING PATTERN "*.hpp"
-)
+# install(DIRECTORY ${CMAKE_SOURCE_DIR}/include/
+#     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/bifrost
+#     FILES_MATCHING PATTERN "*.hpp"
+# )
 
 # 2. Configure and install the desktop file
 # This injects the exact install prefix into the Exec line

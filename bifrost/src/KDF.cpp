@@ -7,6 +7,28 @@
 #include <openssl/sha.h>
 #include <stdexcept>
 
+namespace {
+
+// A single static byte used only as a non-null placeholder address for
+// zero-length OSSL_PARAM octet strings. Its VALUE is never read — OpenSSL
+// is told data_size = 0 for these params, so it must not (and per the docs,
+// does not) dereference this pointer. Only its non-null-ness matters.
+Byte g_empty_octet_sentinel = 0;
+
+// Returns a pointer suitable for OSSL_PARAM_construct_octet_string: the
+// buffer's real data pointer if non-empty, or the sentinel above if empty.
+// Never returns nullptr, regardless of what SecureBytes::data() /
+// Bytes::data() return for a zero-length buffer.
+inline Byte *ossl_safe_data(const SecureBytes &b) {
+    return b.empty() ? &g_empty_octet_sentinel : const_cast<Byte *>(b.data());
+}
+
+inline Byte *ossl_safe_data(const Bytes &b) {
+    return b.empty() ? &g_empty_octet_sentinel : const_cast<Byte *>(b.data());
+}
+
+} // namespace
+
 // ---------------------------------------------------------------------------
 // HKDF-SHA256  (RFC 5869)
 // ---------------------------------------------------------------------------
@@ -34,11 +56,11 @@ void hkdf_sha256(const SecureBytes &ikm, const SecureBytes &salt,
     params[i++] = OSSL_PARAM_construct_utf8_string(OSSL_KDF_PARAM_DIGEST,
                                                    md_name, sizeof(md_name));
     params[i++] = OSSL_PARAM_construct_octet_string(
-        OSSL_KDF_PARAM_KEY, const_cast<Byte *>(ikm.data()), ikm.size());
+        OSSL_KDF_PARAM_KEY, ossl_safe_data(ikm), ikm.size());
     params[i++] = OSSL_PARAM_construct_octet_string(
-        OSSL_KDF_PARAM_SALT, const_cast<Byte *>(salt.data()), salt.size());
+        OSSL_KDF_PARAM_SALT, ossl_safe_data(salt), salt.size());
     params[i++] = OSSL_PARAM_construct_octet_string(
-        OSSL_KDF_PARAM_INFO, const_cast<Byte *>(info.data()), info.size());
+        OSSL_KDF_PARAM_INFO, ossl_safe_data(info), info.size());
     params[i++] = OSSL_PARAM_construct_end();
 
     if (EVP_KDF_derive(ctx, okm.data(), okm.size(), params) <= 0) {

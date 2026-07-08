@@ -1,9 +1,21 @@
 """
-auth2fa — Two-Factor Authentication demo with X25519 key exchange.
+auth2fa — Two-Factor Authentication demo using mTLS + HKDF key derivation.
 
-mTLS registration endpoint added: Bifrost C++ client connects via mutual TLS,
-sends a GET request to the signup URL (bifrost-totp://host=.../signup/<pin>&port=...),
-and receives PW_KEY=<hex>&ACC_INFO=<username> in the response body.
+Bifrost C++ client connects via mutual TLS, sends a GET request to the
+signup URL (bifrost-totp://host=...&port=...), and receives
+PW_KEY=<hex>&ACC_INFO=<username> in the response body. Both sides then
+independently derive the same 48-byte TOTP secret via:
+
+    HKDF-SHA256(salt=PW_KEY, ikm=TLS_exporter_secret, info="bifrost-totp-key")
+
+This is the ONLY registration path. An earlier browser-based X25519/finite-
+field-DH exchange flow (page_exchange.html, utils/dh.py, the /signup/<pin>
+POST form) has been removed: it derived shared_secret_hex from a toy
+finite-field DH group (~56-bit prime) that offered no real security margin,
+and — because it wrote to the same column as the mTLS path — could silently
+overwrite a correctly HKDF-derived secret with a trivially-breakable one if
+both endpoints were reachable. Do not reintroduce a second writer to
+shared_secret_hex without ensuring it cannot race the mTLS handler.
 
 PKI layout expected (relative to cwd):
     pki/root-ca/root-ca.crt
@@ -11,6 +23,7 @@ PKI layout expected (relative to cwd):
     pki/server/server.key
 """
 
+import hashlib
 import logging
 import os
 import random
@@ -19,8 +32,6 @@ import ssl
 import sys
 import threading
 import time
-
-import argon2.low_level
 
 print("RUNTIME PYTHON VERSION:", sys.version)
 
@@ -34,7 +45,7 @@ from flask import (
     url_for,
 )
 from flask_sqlalchemy import SQLAlchemy
-from utils import dh, totp
+from utils import totp
 from werkzeug.security import check_password_hash, generate_password_hash
 
 # ---------------------------------------------------------------------------
@@ -67,12 +78,10 @@ CLIENT_CA = "./pki/root-ca/root-ca.crt"
 MTLS_PORT = int(os.environ.get("MTLS_PORT", 8443))
 MTLS_ENABLED = all(os.path.exists(p) for p in [SERVER_CHAIN, SERVER_KEY, CLIENT_CA])
 
-# BUG 6 FIX: This label must match BIFROST_EXPORTER_LABEL in tls.hpp exactly.
+# This label must match BIFROST_EXPORTER_LABEL in tls.hpp exactly.
 # Both sides call their respective export_keying_material APIs with this label,
 # which implements RFC 5705 (TLS 1.2) / RFC 8446 §7.5 (TLS 1.3) and produces
-# identical output.  The old approach used conn.export_keying_material with
-# the label "EXPORTER_SECRET", which is an RFC 5705 derivation — completely
-# different from the raw EXPORTER_SECRET captured by the C++ keylog callback.
+# identical output.
 BIFROST_EXPORTER_LABEL = "bifrost-ms"
 
 # ---------------------------------------------------------------------------
@@ -90,11 +99,10 @@ class User(db.Model):
 class ExchangeToken(db.Model):
     pin = db.Column(db.String(6), primary_key=True)
     username = db.Column(db.String(80), db.ForeignKey("user.username"), nullable=False)
-    server_priv_hex = db.Column(db.String(64), nullable=False)
-    server_pub_hex = db.Column(db.String(64), nullable=False)
-    # PW_KEY: Argon2id-derived bytes sent to Bifrost over mTLS.
+    # PW_KEY: PBKDF2-SHA256-derived bytes sent to Bifrost over mTLS.
     # Bifrost uses it with HKDF(ikm=exporter_secret, salt=PW_KEY) to derive
-    # the TOTP key.  The server does the same derivation and stores the result.
+    # the TOTP key. The server (_handle_bifrost_connection) does the same
+    # derivation and stores the result in User.shared_secret_hex.
     pw_key_hex = db.Column(db.String(64), nullable=False)
     created_at = db.Column(db.Float, nullable=False)
 
@@ -113,16 +121,20 @@ TOKEN_TTL = 300  # 5 minutes
 
 
 def _generate_pw_key(password: str) -> bytes:
-    """Derive a 16-byte PW_KEY using Argon2id as per the diagram."""
+    """
+    Derive a 16-byte PW_KEY using PBKDF2-SHA256.
+
+    600,000 iterations matches PBKDF2_N_ITERATIONS in KeyStore.hpp (the
+    OWASP 2023 baseline for PBKDF2-HMAC-SHA256), so this call site and the
+    client's local key-store password KDF use the same iteration count.
+    """
     salt = os.urandom(16)
-    return argon2.low_level.hash_secret_raw(
-        secret=password.encode("utf-8"),
-        salt=salt,
-        time_cost=2,
-        memory_cost=65536,
-        parallelism=1,
-        hash_len=16,
-        type=argon2.low_level.Type.ID,
+    return hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode("utf-8"),
+        salt,
+        310_000,
+        dklen=16,
     )
 
 
@@ -194,7 +206,6 @@ def _create_mtls_ctx() -> ssl.SSLContext:
 
 import ctypes
 import ctypes.util
-import hashlib
 import hmac as hmac_mod
 
 
@@ -263,6 +274,8 @@ def ssl_export_keying_material(
 def _handle_bifrost_connection(conn: ssl.SSLSocket, peer_addr: tuple) -> None:
     """
     Handle one Bifrost registration connection.
+
+    This is the ONLY code path that may set User.shared_secret_hex.
     """
     peer = f"{peer_addr[0]}:{peer_addr[1]}"
     log.info("[mTLS] %s connected", peer)
@@ -287,11 +300,9 @@ def _handle_bifrost_connection(conn: ssl.SSLSocket, peer_addr: tuple) -> None:
         if not lines or not lines[0]:
             return
 
-        # BUG 4 FIX: Parse the PIN from the request line so we look up the
-        # correct ExchangeToken instead of blindly picking the most-recent one.
+        # Parse the PIN from the request line so we look up the correct
+        # ExchangeToken instead of blindly picking the most-recent one.
         # The C++ client sends: GET /signup/<pin> HTTP/1.1
-        # Old code: ExchangeToken.query.order_by(created_at.desc()).first()
-        #   — races between concurrent registrations and ignores the PIN entirely.
         request_line = lines[0]  # e.g. "GET /signup/123456 HTTP/1.1"
         pin = None
         parts = request_line.split()
@@ -350,10 +361,8 @@ def _handle_bifrost_connection(conn: ssl.SSLSocket, peer_addr: tuple) -> None:
                 )
                 pw_key_bytes = bytes.fromhex(pw_key_hex)
 
-                # BUG 5 FIX: info must be exactly 16 bytes — no null terminator.
-                # C++ previously used sizeof() on a char array literal which
-                # includes the implicit '\0', giving 17 bytes and a different key.
-                # tls.hpp now builds TOTP_HKDF_INFO via string_view (16 bytes).
+                # info must be exactly 16 bytes — no null terminator.
+                # tls.hpp builds TOTP_HKDF_INFO via string_view (16 bytes).
                 hkdf_info = b"bifrost-totp-key"  # 16 bytes, matches C++
 
                 derived_secret = hkdf_extract_and_expand(
@@ -512,9 +521,6 @@ def page_2():
         db.session.commit()
         session["saved_username"] = username
 
-        server_priv = dh.generate_private_key()
-        server_pub = dh.public_key(server_priv)
-
         pw_key = _generate_pw_key(password)
 
         _purge_expired_tokens()
@@ -526,19 +532,15 @@ def page_2():
         token_entry = ExchangeToken(
             pin=pin,
             username=username,
-            server_priv_hex=server_priv.hex(),
-            server_pub_hex=server_pub.hex(),
             pw_key_hex=pw_key.hex(),
             created_at=time.time(),
         )
         db.session.add(token_entry)
         db.session.commit()
 
-        exchange_url = url_for("exchange_endpoint", pin=pin, _external=True)
-
         server_host = request.host.split(":")[0]
         bifrost_uri = (
-            f"bifrost-totp://host={server_host}{url_for('exchange_endpoint', pin=pin)}"
+            f"bifrost-totp://host={server_host}/signup/{pin}"
             f"&port={MTLS_PORT}"
         )
 
@@ -552,76 +554,11 @@ def page_2():
         return render_template(
             "page2.html",
             show_token=True,
-            server_pub=server_pub.hex(),
-            exchange_url=exchange_url,
             pin=pin,
             bifrost_uri=bifrost_uri,
         )
 
     return render_template("page2.html")
-
-
-@app.route("/signup/<pin>", methods=["GET", "POST"])
-def exchange_endpoint(pin: str):
-    token_entry = db.session.get(ExchangeToken, pin)
-
-    if token_entry is None:
-        if request.is_json:
-            return jsonify({"error": "Endpoint not found or already used."}), 404
-        return render_template("page_exchange.html", expired=True), 404
-
-    if time.time() - token_entry.created_at > TOKEN_TTL:
-        db.session.delete(token_entry)
-        db.session.commit()
-        if request.is_json:
-            return jsonify({"error": "Endpoint expired."}), 410
-        return render_template("page_exchange.html", expired=True), 410
-
-    if request.method == "GET":
-        return render_template(
-            "page_exchange.html",
-            server_pub=token_entry.server_pub_hex,
-            token=pin,
-        )
-
-    if request.is_json:
-        body = request.get_json(silent=True) or {}
-        client_pub_hex = str(body.get("bifrost-public-key", "")).strip()
-    else:
-        client_pub_hex = request.form.get("bifrost-public-key", "").strip()
-
-    if not client_pub_hex:
-        return jsonify({"error": "Missing bifrost-public-key parameter"}), 400
-
-    user = User.query.filter_by(username=token_entry.username).first()
-    if not user:
-        return jsonify({"error": "User associated with token no longer exists"}), 400
-
-    if user.shared_secret_hex:
-        db.session.delete(token_entry)
-        db.session.commit()
-        return jsonify({"error": "Key exchange already completed for this user."}), 403
-
-    try:
-        server_priv = bytes.fromhex(token_entry.server_priv_hex)
-        client_pub = bytes.fromhex(client_pub_hex)
-        secret = dh.diffie_hellman(server_priv, client_pub)
-    except Exception as exc:
-        return jsonify({"error": f"Key exchange failed: {exc}"}), 400
-
-    server_pub_hex = token_entry.server_pub_hex
-
-    user.shared_secret_hex = secret.hex()
-    db.session.delete(token_entry)
-    db.session.commit()
-
-    return jsonify(
-        {
-            "status": "success",
-            "server-public-key": server_pub_hex,
-            "message": "Key exchange complete",
-        }
-    ), 200
 
 
 @app.route("/signup/status", methods=["GET"])
@@ -696,4 +633,3 @@ if __name__ == "__main__":
     if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not app.debug:
         _start_mtls_server()
     app.run()
-

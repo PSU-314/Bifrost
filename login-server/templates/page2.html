@@ -15,22 +15,14 @@
 
     {% if show_token %}
     {# ── Token details: shown after account creation ── #}
-    <div class="page-tag">STEP 1 COMPLETE — ENTER PIN IN AUTHENTICATOR</div>
+    <div class="page-tag">STEP 1 COMPLETE — OPEN LINK IN BIFROST</div>
     <h1>Exchange <span class="accent">Ready</span></h1>
 
     <div class="alert alert-info">
-        Enter the 6-digit code below into your authenticator. The app will POST its key to the temporary endpoint.
-        The endpoint self-destructs after one use or {{ "5 minutes" }}.
-    </div>
-
-    <div class="token-row">
-        <div class="token-item" style="flex: 1;">
-            <div class="code-label">6-DIGIT CODE</div>
-            <div class="code-block pin-block" style="font-size: 2rem; text-align: center; letter-spacing: 0.2em;">
-                <span id="pin-val">{{ pin }}</span>
-                <button class="copy-btn" onclick="copyText('pin-val')">COPY</button>
-            </div>
-        </div>
+        Click the link below to open it in your Bifrost authenticator. Bifrost will
+        connect to the server over mTLS and complete the key exchange automatically —
+        no further action is required here. This page will redirect once it's done.
+        The registration token self-destructs after one use or {{ "5 minutes" }}.
     </div>
 
     <div class="code-label" style="margin-top: 20px;">BIFROST AUTHENTICATOR LINK (CLICK TO OPEN CLIENT)</div>
@@ -41,27 +33,14 @@
         <button class="copy-btn" onclick="copyText('bifrost-uri-text')">COPY</button>
     </div>
 
-    <div class="code-label" style="margin-top: 20px;">ONE-TIME EXCHANGE ENDPOINT</div>
-    <div class="code-block">
-        <span id="exchange-url">{{ exchange_url }}</span>
-        <button class="copy-btn" onclick="copyText('exchange-url')">COPY</button>
-    </div>
-
     <hr class="divider">
 
     <p class="otp-hint">
-        Your authenticator should send a POST request with the <code>client_pub</code> field to the endpoint above.
+        Waiting for Bifrost to complete the mTLS exchange...
     </p>
 
-    <div class="alert alert-info" style="font-family:var(--mono);font-size:.72rem">
-        <strong>Example curl from Authenticator:</strong><br>
-        curl -X POST "{{ exchange_url }}" \<br>
-        &nbsp;&nbsp;-H "Content-Type: application/json" \<br>
-        &nbsp;&nbsp;-d '{"bifrost-public-key": "&lt;your_64_hex_pubkey&gt;"}'
-    </div>
-
     <div class="link-row">
-        Exchange completed? <a href="{{ url_for('page_3') }}">Proceed to Login →</a>
+        Exchange completed already? <a href="{{ url_for('page_3') }}">Proceed to Login →</a>
     </div>
 
     <script>
@@ -101,8 +80,11 @@
 {% endblock %}
 
 {% block script %}
+{% if show_token %}
 <script>
-    // Poll the status endpoint every 2000ms (2 seconds)
+    // Poll the status endpoint every 2000ms (2 seconds) until the mTLS
+    // handler (_handle_bifrost_connection in app.py) has stored
+    // shared_secret_hex for this user.
     const statusInterval = setInterval(function() {
         fetch("{{ url_for('signup_status') }}")
             .then(response => response.json())
@@ -117,4 +99,5 @@
             .catch(err => console.error("Error checking exchange status:", err));
     }, 2000);
 </script>
+{% endif %}
 {% endblock %}
