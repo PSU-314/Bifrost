@@ -326,7 +326,7 @@ user password
 HKDF-SHA256(ikm=exporter_material, salt=PW_KEY, info="bifrost-totp-key")
      │
      ▼
-  TOTP secret (48 bytes) — stored encrypted on client, hashed on server
+  TOTP secret (32 bytes) — stored encrypted on client, hashed on server
 ```
 
 > **Note:** The 600,000-iteration count matches `PBKDF2_N_ITERATIONS` used for the client's local KeyStore password KDF (see below), so both PBKDF2-SHA256 call sites in the system use the same OWASP-2023-baseline iteration count.
