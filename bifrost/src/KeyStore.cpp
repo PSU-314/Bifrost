@@ -2,8 +2,10 @@
 #include <KDF.hpp>
 #include <KeyStore.hpp>
 #include <cassert>
+#include <csignal>
 #include <cstdint>
 #include <cstdlib>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <openssl/crypto.h>
@@ -12,6 +14,7 @@
 #include <ranges>
 #include <securebytes.hpp>
 #include <stdexcept>
+#include <string>
 #include <utility.hpp>
 
 // ---------------------------------------------------------------------------
@@ -20,6 +23,8 @@
 SecureBytes KeyStore::_encryptionKey;
 SecureBytes KeyStore::_salt;
 std::unordered_map<Bytes, Key, BytesHash> KeyStore::_store;
+bool KeyStore::_initialized = false;
+bool KeyStore::_exitHooksInstalled = false;
 
 // ---------------------------------------------------------------------------
 // Key serialisation  (length-prefixed TLV, little-endian uint32 lengths)
@@ -83,8 +88,7 @@ Key Key::deserialize(const Bytes &data) {
     offset += 4;
 
     // Guard against pathological inputs before reserving / looping.
-    constexpr uint32_t MaxSansCount = 1000;
-    if (sanCount > MaxSansCount)
+    if (sanCount > MAX_SANS_COUNT)
         throw std::runtime_error("Key::deserialize: implausible SAN count");
 
     key.sans.reserve(sanCount);
@@ -170,10 +174,37 @@ EncryptedBlob EncryptedBlob::deserialize(const Bytes &data) {
 // KeyStore — initialisation
 // ---------------------------------------------------------------------------
 
+// KeyStore exit hooks for safe and clean exit
+extern "C" void KeyStoreSignalExitHandler(int sig) {
+    KeyStore::deinit();
+    std::signal(sig, SIG_DFL);
+    std::raise(sig);
+}
+
+void KeyStoreTerminateHandler() {
+    KeyStore::deinit();
+    std::abort();
+}
+
+void KeyStore::installExitHooks() {
+    if (_exitHooksInstalled)
+        return;
+    std::signal(SIGINT, KeyStoreSignalExitHandler);
+    std::signal(SIGTERM, KeyStoreSignalExitHandler);
+    std::set_terminate(KeyStoreTerminateHandler);
+    _exitHooksInstalled = true;
+}
+
 void KeyStore::init(std::string &password) {
+    if (_initialized)
+        throw std::runtime_error("Trying to re-initialize the KeyStore");
+    installExitHooks();
+
     // Wrap the password in SecureBytes immediately so it is wiped on exit.
     SecureBytes passwd(reinterpret_cast<const Byte *>(password.data()),
                        password.size());
+    // Wipe the caller's plaintext password now that the key is derived.
+    OPENSSL_cleanse(password.data(), password.size());
 
     _salt.resize(PBKDF2_SALT_SIZE);
     bool keyfileExists = fs::exists(Paths::keyfile());
@@ -183,26 +214,47 @@ void KeyStore::init(std::string &password) {
         std::ifstream kf(Paths::keyfile(), std::ios::binary);
         kf.read(reinterpret_cast<char *>(_salt.data()),
                 static_cast<std::streamsize>(PBKDF2_SALT_SIZE));
-        if (static_cast<size_t>(kf.gcount()) != PBKDF2_SALT_SIZE)
+        if (static_cast<size_t>(kf.gcount()) != PBKDF2_SALT_SIZE) {
+            _salt.cleanse();
             throw std::runtime_error("KeyStore::init: corrupted keyfile");
+        }
     } else {
         // First run — generate a fresh random salt.
-        if (RAND_bytes(_salt.data(), static_cast<int>(PBKDF2_SALT_SIZE)) != 1)
+        if (RAND_bytes(_salt.data(), static_cast<int>(PBKDF2_SALT_SIZE)) != 1) {
+            _salt.cleanse();
             throw std::runtime_error("KeyStore::init: RAND_bytes failed");
+        }
     }
 
     pbkdf2_sha256(passwd, _salt, PBKDF2_N_ITERATIONS, _encryptionKey);
-    // Wipe the caller's plaintext password now that the key is derived.
-    OPENSSL_cleanse(password.data(), password.size());
+    _initialized = true;
 
     if (keyfileExists)
         loadStore();
+}
+
+void KeyStore::deinit() noexcept {
+    static bool inProgress = false;
+    if (inProgress)
+        return;
+    inProgress = true;
+
+    _encryptionKey.cleanse();
+    _salt.cleanse();
+    for (auto &[ukid, key] : _store)
+        key.secret.cleanse();
+    _store.clear();
+
+    _initialized = false;
+    inProgress = false;
 }
 
 // ---------------------------------------------------------------------------
 // Size (bytes that serialize() would produce, excluding the outer salt field)
 // ---------------------------------------------------------------------------
 size_t KeyStore::size() {
+    if (!_initialized)
+        throw std::runtime_error("KeyStore has not been initialized yet!");
     size_t s = 4; // key count
     for (const auto &[fp, key] : _store)
         s += 4 + key.size();
@@ -289,6 +341,8 @@ Key KeyStore::buildKey(X509 *cert) {
 
 void KeyStore::store(X509 *cert, const std::string &accinfo,
                      SecureBytes &&secret) {
+    if (!_initialized)
+        throw std::runtime_error("KeyStore has not been initialized yet!");
     Key key = buildKey(cert);
     key.secret = std::move(secret);
     key.accinfo = accinfo;
@@ -298,11 +352,15 @@ void KeyStore::store(X509 *cert, const std::string &accinfo,
 
 // Moves key into the store; caller should not use key after this call.
 void KeyStore::store(Key &key) {
+    if (!_initialized)
+        throw std::runtime_error("KeyStore has not been initialized yet!");
     Bytes ukid = getUKID(key);
     _store[ukid] = std::move(key);
 }
 
 void KeyStore::erase(const Bytes &ukid) {
+    if (!_initialized)
+        throw std::runtime_error("KeyStore has not been initialized yet!");
     // find-then-erase avoids a second lookup compared to _store.erase(ukid).
     auto it = _store.find(ukid);
     if (it != _store.end())
@@ -313,14 +371,17 @@ void KeyStore::erase(const Bytes &ukid) {
 // Key identifiers
 // ---------------------------------------------------------------------------
 
-// UKID = SHA-256(accinfo || fingerprint) — stable and unique per registration.
+// UKID = SHA-256(accinfo + "$" + fingerprint) — stable and unique per
+// registration.
 Bytes KeyStore::getUKID(const Key &key) {
     unsigned char digest[EVP_MAX_MD_SIZE];
     unsigned int digestLen = 0;
     EVP_MD_CTX *mdctx = EVP_MD_CTX_new();
+    const std::string delimiter = "$";
 
     if (!mdctx || EVP_DigestInit_ex(mdctx, EVP_sha256(), nullptr) != 1 ||
         EVP_DigestUpdate(mdctx, key.accinfo.c_str(), key.accinfo.size()) != 1 ||
+        EVP_DigestUpdate(mdctx, delimiter.c_str(), delimiter.size()) != 1 ||
         EVP_DigestUpdate(mdctx, key.fingerprint.data(),
                          key.fingerprint.size()) != 1 ||
         EVP_DigestFinal_ex(mdctx, digest, &digestLen) != 1) {
@@ -337,11 +398,15 @@ Bytes KeyStore::getUKID(const Key &key) {
 // ---------------------------------------------------------------------------
 
 const Key *KeyStore::lookupByUKID(const Bytes &ukid) {
+    if (!_initialized)
+        throw std::runtime_error("KeyStore has not been initialized yet!");
     auto it = _store.find(ukid);
     return it != _store.end() ? &it->second : nullptr;
 }
 
 std::vector<const Key *> KeyStore::lookupByFG(const Bytes &fingerprint) {
+    if (!_initialized)
+        throw std::runtime_error("KeyStore has not been initialized yet!");
     std::vector<const Key *> matches;
     for (const auto &[ukid, key] : _store) {
         // Use CRYPTO_memcmp to avoid timing side-channels even though
@@ -355,6 +420,8 @@ std::vector<const Key *> KeyStore::lookupByFG(const Bytes &fingerprint) {
 }
 
 std::vector<const Key *> KeyStore::lookupByCN(const std::string &cn) {
+    if (!_initialized)
+        throw std::runtime_error("KeyStore has not been initialized yet!");
     std::vector<const Key *> matches;
     for (const auto &[ukid, key] : _store)
         if (key.commonName == cn)
@@ -363,6 +430,8 @@ std::vector<const Key *> KeyStore::lookupByCN(const std::string &cn) {
 }
 
 std::vector<const Key *> KeyStore::lookupByAccInfo(const std::string &accinfo) {
+    if (!_initialized)
+        throw std::runtime_error("KeyStore has not been initialized yet!");
     std::vector<const Key *> matches;
     for (const auto &[ukid, key] : _store)
         if (key.accinfo == accinfo)
@@ -371,6 +440,8 @@ std::vector<const Key *> KeyStore::lookupByAccInfo(const std::string &accinfo) {
 }
 
 std::vector<const Key *> KeyStore::getAllKeys() {
+    if (!_initialized)
+        throw std::runtime_error("KeyStore has not been initialized yet!");
     std::vector<const Key *> keys;
     keys.reserve(_store.size());
     for (const auto &[ukid, key] : _store)
@@ -383,6 +454,8 @@ std::vector<const Key *> KeyStore::getAllKeys() {
 // ---------------------------------------------------------------------------
 
 EncryptedBlob KeyStore::encryptStore() {
+    if (!_initialized)
+        throw std::runtime_error("KeyStore has not been initialized yet!");
     EncryptedBlob blob;
     blob.nonce.resize(ENC_BLOB_NONCE_SIZE);
     if (RAND_bytes(blob.nonce.data(), static_cast<int>(ENC_BLOB_NONCE_SIZE)) !=
@@ -432,6 +505,8 @@ EncryptedBlob KeyStore::encryptStore() {
 }
 
 void KeyStore::decryptStore(const EncryptedBlob &blob) {
+    if (!_initialized)
+        throw std::runtime_error("KeyStore has not been initialized yet!");
     if (blob.nonce.size() != ENC_BLOB_NONCE_SIZE)
         throw std::runtime_error("decryptStore: invalid nonce size");
     if (blob.tag.size() != ENC_BLOB_TAG_SIZE)
@@ -487,6 +562,8 @@ void KeyStore::decryptStore(const EncryptedBlob &blob) {
 // ---------------------------------------------------------------------------
 
 Bytes KeyStore::serialize() {
+    if (!_initialized)
+        throw std::runtime_error("KeyStore has not been initialized yet!");
     Bytes out;
     out.reserve(size());
 
@@ -500,12 +577,16 @@ Bytes KeyStore::serialize() {
 }
 
 void KeyStore::deserialize(const Bytes &data) {
+    if (!_initialized)
+        throw std::runtime_error("KeyStore has not been initialized yet!");
     _store.clear();
 
     if (data.size() < 4)
         throw std::runtime_error("KeyStore::deserialize: missing key count");
 
     uint32_t nKeys = readu32(data.data());
+    if (nKeys > MAX_KEY_COUNT)
+        throw std::runtime_error("implausible number of keys!");
     size_t offset = 4;
 
     for (uint32_t i = 0; i < nKeys; ++i) {
@@ -538,6 +619,8 @@ void KeyStore::deserialize(const Bytes &data) {
 // ---------------------------------------------------------------------------
 
 void KeyStore::saveStore() {
+    if (!_initialized)
+        throw std::runtime_error("KeyStore has not been initialized yet!");
     EncryptedBlob eb = encryptStore();
     Bytes ebSerial = eb.serialize();
 
@@ -551,6 +634,8 @@ void KeyStore::saveStore() {
 }
 
 void KeyStore::loadStore() {
+    if (!_initialized)
+        throw std::runtime_error("KeyStore has not been initialized yet!");
     Bytes storeData = readAtomic(Paths::keyfile());
     // Skip the salt prefix (already read during init).
     Bytes ebSerial(storeData.begin() + static_cast<ptrdiff_t>(PBKDF2_SALT_SIZE),

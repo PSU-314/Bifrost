@@ -171,9 +171,13 @@ void writeAtomic(const fs::path &path, const Bytes &data, uint32_t perms) {
     // Fsync the parent directory so the directory entry update is durable.
     int dirfd = ::open(path.parent_path().c_str(), O_RDONLY);
     if (dirfd >= 0) {
-        ::fsync(dirfd);
+        int res = ::fsync(dirfd);
         ::close(dirfd);
-    }
+        if (res != 0)
+            throw std::runtime_error("writeAtomic: fsync failed");
+    } else
+        throw std::runtime_error(
+            "writeAtomic: failed to open parent directory");
 }
 
 // Read the contents of path into a Bytes buffer.  Retries on EINTR; tolerates

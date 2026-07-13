@@ -28,6 +28,8 @@ inline constexpr size_t ENC_BLOB_NONCE_SIZE = 12; // AES-GCM 96-bit nonce
 inline constexpr size_t ENC_BLOB_TAG_SIZE = 16;   // AES-GCM 128-bit tag
 inline constexpr int PBKDF2_N_ITERATIONS = 600'000;
 inline constexpr size_t PBKDF2_SALT_SIZE = 16;
+inline constexpr uint32_t MAX_SANS_COUNT = 1000;
+inline constexpr uint32_t MAX_KEY_COUNT = 1000;
 
 // ---------------------------------------------------------------------------
 // Key — holds everything we need to generate and display a TOTP for one
@@ -76,11 +78,16 @@ class KeyStore {
         static SecureBytes _encryptionKey;
         static SecureBytes _salt;
         static std::unordered_map<Bytes, Key, BytesHash> _store;
+        static bool _initialized;
+        static bool _exitHooksInstalled;
+
+        static void installExitHooks();
 
     public:
         // Initialise from the password: derive the encryption key, then load
         // and decrypt the on-disk store if it already exists.
         static void init(std::string &password);
+        static void deinit() noexcept;
 
         // Number of entries currently held in memory.
         static size_t size();
