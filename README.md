@@ -343,15 +343,9 @@ master password
   encrypted KeyStore blob
 ```
 
-**Known limitations / planned improvements:**
+**Known limitations:**
 
-- TOTP currently uses HMAC-SHA1 (RFC 6238 default). A migration to HMAC-SHA256 is noted in the source (`// TODO: SECURITY — SHA-1 is cryptographically weak`) and requires both sides to switch simultaneously.
 - `ssl.VERIFY_X509_STRICT` is currently commented out on the server (`# ctx.verify_flags = ssl.VERIFY_X509_STRICT`) due to OpenSSL 3.x compatibility considerations.
-
-**Fixed since the initial design:**
-
-- An earlier browser-based registration path (`login-server/utils/dh.py`, `exchange_endpoint()`, `page_exchange.html`) computed `shared_secret_hex` via finite-field Diffie-Hellman over a ~56-bit prime — not a cryptographically meaningful security margin. Because it wrote to the same database column as the mTLS+HKDF path, it could silently overwrite a correctly-derived secret with a trivially-breakable one whenever both endpoints were reachable. This path has been removed; `_handle_bifrost_connection` (the mTLS handler) is now the sole writer of `shared_secret_hex`.
-- `PW_KEY` derivation was switched from Argon2id to PBKDF2-SHA256 (600,000 iterations), removing the `argon2-cffi` dependency in favor of the Python standard library's `hashlib.pbkdf2_hmac`.
 
 ---
 
