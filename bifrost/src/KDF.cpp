@@ -1,3 +1,6 @@
+// Implements the key derivation functions declared in KDF.hpp: HKDF-SHA256
+// via OpenSSL 3.x's EVP_KDF API, and PBKDF2-SHA256 via PKCS5_PBKDF2_HMAC.
+
 #include <KDF.hpp>
 #include <bifrost.hpp>
 #include <openssl/core_names.h>

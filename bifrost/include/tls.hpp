@@ -1,3 +1,9 @@
+// mTLS client for Bifrost's registration handshake: builds a hardened
+// SSL_CTX (TLS 1.2-1.3, pinned cipher suites, client cert), performs the
+// handshake with hostname/IP verification, exports per-connection key
+// material via RFC 5705, and drives the HTTP-over-TLS registration exchange
+// that yields a new Key from a bifrost-totp:// URL.
+
 #pragma once
 
 #include <openssl/crypto.h>

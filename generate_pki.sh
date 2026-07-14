@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-umask 177
+# umask 177
 
 # 1. Clean and setup staging directories
 rm -rf pki_staging

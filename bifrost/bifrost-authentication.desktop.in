@@ -1,3 +1,10 @@
+# freedesktop.org .desktop entry template for Bifrost, configured by CMake
+# (configure_file substitutes @CMAKE_INSTALL_PREFIX@ / @CMAKE_INSTALL_BINDIR@).
+# Registers the bifrost-totp:// URI scheme so external processes (e.g. a
+# browser or xdg-open) can hand a TOTP enrollment URL to the bifrost binary.
+# NoDisplay=true keeps it out of application launchers/menus since it is
+# invoked only via the URL handler, not launched directly by a user.
+
 [Desktop Entry]
 Version=2.0
 Type=Application

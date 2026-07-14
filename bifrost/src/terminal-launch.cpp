@@ -1,3 +1,8 @@
+// Implements the terminal-relaunch helpers declared in terminal-launch.hpp:
+// resolving this executable's own path, POSIX shell-quoting, and spawning a
+// terminal emulator (or Terminal.app / cmd.exe) that re-runs Bifrost with
+// SENTINEL_FLAG so it renders as a visible TUI.
+
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>

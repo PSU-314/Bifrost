@@ -133,7 +133,7 @@ def _generate_pw_key(password: str) -> bytes:
         "sha256",
         password.encode("utf-8"),
         salt,
-        310_000,
+        600_000,
         dklen=16,
     )
 
@@ -369,7 +369,7 @@ def _handle_bifrost_connection(conn: ssl.SSLSocket, peer_addr: tuple) -> None:
                     salt=pw_key_bytes,
                     ikm=ms,
                     info=hkdf_info,
-                    length=48,
+                    length=32,
                 )
 
                 user.shared_secret_hex = derived_secret.hex()
@@ -539,10 +539,7 @@ def page_2():
         db.session.commit()
 
         server_host = request.host.split(":")[0]
-        bifrost_uri = (
-            f"bifrost-totp://host={server_host}/signup/{pin}"
-            f"&port={MTLS_PORT}"
-        )
+        bifrost_uri = f"bifrost-totp://host={server_host}/signup/{pin}&port={MTLS_PORT}"
 
         log.info(
             "Signup: token for user '%s'  PIN=%s  bifrost_uri=%s",

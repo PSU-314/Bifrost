@@ -1,3 +1,8 @@
+// Implements the mTLS client declared in tls.hpp: hardened SSL_CTX setup,
+// raw TCP connect, the TLS handshake with hostname/IP verification, framed
+// send/recv, graceful shutdown, and the HTTP-over-TLS registration flow that
+// turns a bifrost-totp:// URL into a stored Key.
+
 #include <cstdint>
 #include <limits>
 #include <openssl/crypto.h>

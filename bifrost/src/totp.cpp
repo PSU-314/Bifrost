@@ -1,3 +1,8 @@
+// Implements RFC 6238 TOTP generation declared in totp.hpp: HMAC-SHA256,
+// RFC 4226 dynamic truncation, and the final OTP_SIZE-digit code + validity
+// window calculation.
+
+#include <bifrost.hpp>
 #include <cmath>
 #include <cstdint>
 #include <ctime>
@@ -8,22 +13,20 @@
 #include <totp.hpp>
 #include <utility.hpp>
 
-// TODO: SECURITY — HMAC-SHA1 is cryptographically weak.  Migrate to
-// HMAC-SHA256 (TOTP_DIGEST_SIZE = 32) once the server supports it.
-
-// Compute HMAC-SHA1(key, msg).  Returns TOTP_DIGEST_SIZE (20) bytes.
-Bytes generate_hmac_sha1(const SecureBytes &key, const Bytes &msg) {
+// Compute HMAC-SHA256(key, msg).  Returns TOTP_DIGEST_SIZE (32) bytes.
+Bytes generate_hmac_sha256(const SecureBytes &key, const Bytes &msg) {
     Bytes hash(TOTP_DIGEST_SIZE);
     unsigned int len = 0;
 
-    if (!HMAC(EVP_sha1(), key.data(), static_cast<int>(key.size()),
+    if (!HMAC(EVP_sha256(), key.data(), static_cast<int>(key.size()),
               reinterpret_cast<const unsigned char *>(msg.data()), msg.size(),
               hash.data(), &len))
-        throw std::runtime_error("generate_hmac_sha1: HMAC computation failed");
+        throw std::runtime_error(
+            "generate_hmac_sha256: HMAC computation failed");
 
     if (len != TOTP_DIGEST_SIZE)
         throw std::runtime_error(
-            "generate_hmac_sha1: unexpected output length");
+            "generate_hmac_sha256: unexpected output length");
 
     return hash;
 }
@@ -32,7 +35,7 @@ Bytes generate_hmac_sha1(const SecureBytes &key, const Bytes &msg) {
 // the offset, then four bytes are read and the top bit is masked off to
 // produce a 31-bit unsigned integer.
 uint32_t genSample(const SecureBytes &key, std::time_t timeStep) {
-    Bytes hash = generate_hmac_sha1(key, timeToBytes(timeStep));
+    Bytes hash = generate_hmac_sha256(key, timeToBytes(timeStep));
     Byte offset = hash.back() & 0x0F;
 
     uint32_t sample = (static_cast<uint32_t>(hash[offset]) << 24) |

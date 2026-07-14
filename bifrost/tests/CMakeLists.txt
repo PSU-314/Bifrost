@@ -4,8 +4,9 @@
 # Professional-grade test integration for Bifrost.
 #
 # Design decisions:
-#   • One binary per tested module (test_utility, test_totp, test_kdf,
-#     test_keystore).  Separate binaries mean:
+#   • One binary per tested module (test_utility, test_totp, test_kdf; a
+#     test_keystore binary is scaffolded below but not yet enabled).
+#     Separate binaries mean:
 #       – a crash in one module does not prevent other tests from running,
 #       – CTest reports per-module pass/fail clearly,
 #       – parallel execution via `ctest -j4` is safe (no shared state).
@@ -62,8 +63,8 @@ endfunction()
 # parseURLParams.  No OpenSSL crypto calls — fastest test to run.
 bifrost_add_test(test_utility  test_utility.cpp  "unit;utility")
 
-# totp.cpp: HMAC-SHA1 (RFC 2202 vectors), genSample (RFC 6238 Appendix B),
-# generateOTP (wall-clock integration).
+# totp.cpp: HMAC-SHA256 (RFC 4231 vectors), genSample (RFC 6238 Appendix B,
+# SHA256 column), generateOTP (wall-clock integration).
 bifrost_add_test(test_totp     test_totp.cpp     "unit;totp")
 
 # KDF.cpp: HKDF-SHA256 (RFC 5869 Appendix A), PBKDF2-SHA256 (RFC 6070).

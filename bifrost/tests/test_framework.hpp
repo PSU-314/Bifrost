@@ -2,8 +2,8 @@
 // test_framework.hpp — minimal, dependency-free unit test framework for
 // Bifrost's test suite.
 //
-// This header implements the macro contract already assumed by
-// test_keystore.cpp, test_utility.cpp, test_kdf.cpp, and test_totp.cpp:
+// This header implements the macro contract shared by test_utility.cpp,
+// test_kdf.cpp, and test_totp.cpp:
 //
 //   REGISTER_TEST("module.behavior.case") {
 //       ... test body ...
@@ -26,9 +26,9 @@
 //     hermetic and fast, matching the "single header" comment already in
 //     tests/CMakeLists.txt.
 //   • A failed EXPECT_* records the failure and lets the test continue
-//     running (soft assertion), matching how test_keystore.cpp chains
-//     multiple EXPECT_EQ calls in one test body expecting all of them to be
-//     individually reported rather than stopping at the first failure.
+//     running (soft assertion), so a test chaining several EXPECT_EQ calls
+//     gets every failure individually reported rather than stopping at the
+//     first one.
 //   • Each REGISTER_TEST block becomes a distinct function, registered into
 //     a static list at static-init time via a helper struct's constructor —
 //     this is what lets BIFROST_TEST_MAIN() discover and run every test
@@ -144,9 +144,8 @@ inline void report_failure(const std::string &file, int line,
 // ---------------------------------------------------------------------------
 // All EXPECT_* macros are "soft" — a failure is recorded and execution
 // continues to the next statement in the test body, rather than throwing or
-// aborting. This matches test_keystore.cpp's style of chaining several
-// EXPECT_EQ calls in a single test and expecting to see every failure
-// reported in one run, not just the first.
+// aborting. This lets a test that chains several EXPECT_EQ calls report
+// every failure in one run, not just the first.
 
 #define EXPECT_TRUE(expr)                                                    \
     do {                                                                     \
@@ -212,10 +211,9 @@ inline void report_failure(const std::string &file, int line,
 
 // expr must throw an exception derived from std::exception. If msg_substr
 // is non-empty, the caught exception's what() must contain it as a
-// substring (matching test_keystore.cpp's use, e.g.
-// EXPECT_THROWS_MSG(Key::deserialize(serial), "trailing")). Pass "" to
-// assert only that *some* exception was thrown, without checking the
-// message text.
+// substring. Pass "" to assert only that *some* exception was thrown,
+// without checking the message text (e.g. as test_utility.cpp does for
+// EXPECT_THROWS_MSG(hexToBytes("zz"), "")).
 #define EXPECT_THROWS_MSG(expr, msg_substr)                                  \
     do {                                                                     \
         bool bifrost_test_threw = false;                                    \

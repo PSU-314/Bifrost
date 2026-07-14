@@ -1,3 +1,9 @@
+// Re-launches Bifrost inside a visible terminal window on first run (Bifrost
+// is a TUI app typically started by double-click / URL handler, not from an
+// existing terminal). Provides self-path resolution, POSIX shell quoting,
+// and the platform-specific relaunch logic (terminal emulator on Linux,
+// Terminal.app via AppleScript on macOS, cmd.exe on Windows).
+
 #pragma once
 
 #include <string>
@@ -13,8 +19,9 @@
 #endif
 
 // Checked by main() to detect re-entry after terminal launch.
-// Defined as string_view rather than a C-string macro so SENTINEL_FLAG.c_str()
-// at the call site is explicit and string comparisons work without strlen.
+// Defined as string_view rather than a C-string macro so call sites convert
+// it explicitly as needed (e.g. .data() for strcmp, std::string(...) for
+// concatenation) and comparisons work without strlen.
 inline constexpr std::string_view SENTINEL_FLAG{"--__in_terminal__"};
 
 // Resolve the absolute path of the currently running executable.

@@ -1,3 +1,8 @@
+// Key derivation functions used by Bifrost's KeyStore for turning a
+// user-supplied password into encryption/authentication key material.
+// Exposes HKDF-SHA256 (RFC 5869) for expanding existing high-entropy secrets
+// and PBKDF2-SHA256 (RFC 2898) for stretching low-entropy passwords.
+
 #pragma once
 
 #include <bifrost.hpp>

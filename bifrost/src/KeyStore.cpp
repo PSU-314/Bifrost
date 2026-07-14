@@ -1,3 +1,8 @@
+// Implements the KeyStore declared in KeyStore.hpp: Key/EncryptedBlob
+// serialisation, certificate-derived key construction, in-memory
+// store/erase/lookup, AES-256-GCM encrypt/decrypt of the whole store, and
+// atomic load/save to the on-disk keyfile (salt-prefixed encrypted blob).
+
 #include "bifrost.hpp"
 #include <KDF.hpp>
 #include <KeyStore.hpp>
@@ -472,7 +477,9 @@ EncryptedBlob KeyStore::encryptStore() {
         throw std::runtime_error("encryptStore: EVP_EncryptInit_ex failed");
     }
 
-    // Prepend the magic signature so we can detect a wrong password on decrypt.
+    // Serialise the in-memory store as the plaintext to encrypt. Wrong
+    // password or tampering is detected via the GCM authentication tag
+    // (checked in decryptStore) — no extra integrity marker is needed here.
     Bytes storeSerial = serialize();
     Bytes plaintext;
     plaintext.reserve(storeSerial.size());

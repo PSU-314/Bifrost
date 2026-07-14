@@ -1,3 +1,8 @@
+# Builds the bifrost_lib static library (crypto/TLS/KeyStore core, linked as
+# bifrost::lib) and the bifrost executable that wraps it, applying the shared
+# warning/hardening flags to both. Also configures and installs the .desktop
+# launcher.
+
 # Explicit source listing - NO GLOBBING
 set(BIFROST_LIB_SOURCES
     KDF.cpp

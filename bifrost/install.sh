@@ -56,12 +56,12 @@ if [[ "${1:-}" == "--uninstall" ]]; then
 fi
 
 # ---- Argument parsing ----------------------------------------------------
-# NOTE: this remains simple positional parsing, matching the original
-# script's style. It intentionally does NOT support combining --clean and
-# --skip-tests in one invocation (e.g. "./install.sh --clean --skip-tests"
-# will only honor --clean). If you need combinable flags, replace this block
-# with a `while getopts` or manual `while [[ $# -gt 0 ]]` loop that shifts
-# through all arguments instead of only inspecting "$1".
+# NOTE: this uses simple positional parsing and intentionally does NOT
+# support combining --clean and --skip-tests in one invocation (e.g.
+# "./install.sh --clean --skip-tests" will only honor --clean). If you need
+# combinable flags, replace this block with a `while getopts` or manual
+# `while [[ $# -gt 0 ]]` loop that shifts through all arguments instead of
+# only inspecting "$1".
 if [[ "${1:-}" == "--clean" ]]; then
     log "Cleaning previous build directory..."
     rm -rf "$SCRIPT_DIR/$BUILD_DIR"
@@ -135,6 +135,54 @@ for key in "$SCRIPT_DIR/certs/"*.key; do
         install -m 400 "$key" "$CONFIG_DIR/certs/"
     fi
 done
+
+log "Verifying certificate installation..."
+success=true
+
+echo "$CONFIG_DIR/certs"
+echo "$SCRIPT_DIR/certs/"*.crt
+
+# Check if the directory exists
+if [[ ! -d "$CONFIG_DIR/certs" ]]; then
+    log "ERROR: Certificate directory was not created."
+    success=false
+fi
+
+# Verification function for permissions
+verify_perms() {
+    local file="$1"
+    local expected="$2"
+    
+    # Get current permissions in octal format (e.g., 444)
+    # Note: If on macOS, use: stat -f "%Lp" "$file"
+    local current=$(stat -c "%a" "$file" 2>/dev/null)
+    
+    if [[ "$current" != "$expected" ]]; then
+        log "ERROR: $file has incorrect permissions (Got: $current, Expected: $expected)"
+        success=false
+    fi
+}
+
+# Verify .crt and .pem files (Expected: 444)
+for cert in "$CONFIG_DIR/certs/"*.crt "$CONFIG_DIR/certs/"*.pem; do
+    if [[ -f "$cert" ]]; then
+        verify_perms "$cert" "444"
+    fi
+done
+
+# Verify .key files (Expected: 400)
+for key in "$CONFIG_DIR/certs/"*.key; do
+    if [[ -f "$key" ]]; then
+        verify_perms "$key" "400"
+    fi
+done
+
+if $success; then
+    log "Certificates installed and verified successfully."
+else
+    log "CRITICAL: Certificate installation verification failed."
+    exit 1
+fi
 
 # ── Register MIME / URL scheme ────────────────────────────────────────────────
 if [[ "$OS" == "Linux" ]]; then

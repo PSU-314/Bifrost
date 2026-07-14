@@ -1,3 +1,9 @@
+# Top-level build configuration for Bifrost.
+# Sets the C++20 toolchain requirements, pulls in OpenSSL/Threads, wires up
+# the shared compiler-warning and hardening flag modules from cmake/, and
+# descends into src/ (library + CLI) and, when BIFROST_BUILD_TESTS is on,
+# tests/ (unit test suite).
+
 cmake_minimum_required(VERSION 3.28)
 
 project(bifrost VERSION 2.0 LANGUAGES CXX)
@@ -30,4 +36,3 @@ add_subdirectory(src)
 if (BIFROST_BUILD_TESTS)
     add_subdirectory(tests)
 endif()
-

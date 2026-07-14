@@ -1,3 +1,8 @@
+// General-purpose helpers shared across Bifrost: hex encode/decode, the
+// BytesHash functor for KeyStore's unordered_map, RFC 6238 time encoding,
+// little-endian uint32 (de)serialisation for the on-disk formats, atomic
+// file I/O, and bifrost-totp:// URL query-string parsing.
+
 #pragma once
 
 #include <bifrost.hpp>

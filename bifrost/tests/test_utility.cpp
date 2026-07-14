@@ -10,14 +10,13 @@
 //   • parseURLParams     — query-string parsing, delimiters, edge cases
 //
 // NOT tested here: writeAtomic / readAtomic (filesystem integration test —
-// requires a real temp directory and is covered by the integration test
-// binary, matching the convention set in test_keystore.cpp for KeyStore::init
-// and loadStore/saveStore).
+// requires a real temp directory and belongs in a KeyStore-level
+// integration test, since KeyStore::saveStore/loadStore are their only
+// current callers).
 //
-// This file follows the same structure as test_keystore.cpp: one
-// REGISTER_TEST block per behavior, named "module.function.case", with no
-// shared mutable state between tests (all functions here are pure, so no
-// clear_store()-style fixture is needed).
+// This file follows one REGISTER_TEST block per behavior, named
+// "module.function.case", with no shared mutable state between tests (all
+// functions here are pure, so no clear_store()-style fixture is needed).
 // ---------------------------------------------------------------------------
 
 #include "test_framework.hpp"

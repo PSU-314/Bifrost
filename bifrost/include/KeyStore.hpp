@@ -1,3 +1,9 @@
+// In-memory + on-disk store for Bifrost's registered TOTP keys. Defines the
+// Key record (one per registered server), the EncryptedBlob envelope used to
+// persist the store, and the KeyStore static singleton that ties certificate
+// inspection, AES-256-GCM encryption, and atomic file I/O together into
+// init/store/lookup/save-load operations keyed by UKID.
+
 #pragma once
 
 #include <bifrost.hpp>
@@ -72,7 +78,7 @@ struct EncryptedBlob {
 
 // ---------------------------------------------------------------------------
 // KeyStore — static singleton that owns all registered Keys in memory and on
-// disk.  Indexed by UKID (SHA-256 of accinfo || fingerprint).
+// disk.  Indexed by UKID (SHA-256 of accinfo + "$" + fingerprint).
 // ---------------------------------------------------------------------------
 class KeyStore {
         static SecureBytes _encryptionKey;
@@ -113,7 +119,8 @@ class KeyStore {
 
         // ── Key identifiers
         // ────────────────────────────────────────────────────── UKID =
-        // SHA-256(accinfo || fingerprint) — stable, unique per registration.
+        // SHA-256(accinfo + "$" + fingerprint) — stable, unique per
+        // registration.
         static Bytes getUKID(const Key &key);
 
         // ── Lookup

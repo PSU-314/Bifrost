@@ -1,3 +1,8 @@
+// Self-wiping byte buffer for secrets (passwords, derived keys, TOTP seeds).
+// SecureBytes and its backing SecureAllocator ensure memory is zeroed via
+// OPENSSL_cleanse both on deallocation and on explicit cleanse(), so secrets
+// don't linger on the heap after use.
+
 #pragma once
 
 #include <bifrost.hpp>

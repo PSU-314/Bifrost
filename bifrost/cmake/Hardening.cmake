@@ -1,3 +1,9 @@
+# Compile/link hardening flags for Bifrost targets.
+# Provides set_security_flags(<target>), which applies PIE/PIC, stack
+# protection, fortification, and linker hardening (RELRO/BIND_NOW/NX on
+# Linux, equivalents on macOS), plus opt-in ASan/UBSan for Debug builds
+# via ENABLE_SANITIZERS.
+
 option(ENABLE_SANITIZERS "Enable ASAN and UBSAN for debugging" OFF)
 
 function(set_security_flags target)

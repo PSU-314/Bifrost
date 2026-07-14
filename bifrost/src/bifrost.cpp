@@ -1,3 +1,8 @@
+// Bifrost CLI entry point: relaunches itself in a visible terminal on first
+// run, unlocks the KeyStore with a password prompt, optionally registers a
+// new key from a bifrost-totp:// URL passed as an argument, then loops
+// rendering all stored accounts' live TOTP codes.
+
 #include <KeyStore.hpp>
 #include <algorithm>
 #include <bifrost.hpp>

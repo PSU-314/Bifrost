@@ -1,3 +1,7 @@
+// Implements the general-purpose helpers declared in utility.hpp: hex
+// encode/decode, RFC 6238 big-endian time encoding, little-endian uint32
+// (de)serialisation, atomic file write/read, and URL query-string parsing.
+
 #include <bifrost.hpp>
 #include <fcntl.h>
 #include <filesystem>

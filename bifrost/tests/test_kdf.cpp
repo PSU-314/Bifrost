@@ -21,8 +21,7 @@
 //
 // NOT tested here: KeyStore's use of these functions (PBKDF2_N_ITERATIONS,
 // integration with KeyStore's encryption key derivation) — that belongs to
-// test_keystore.cpp / the integration test binary, not this module-level
-// suite.
+// a KeyStore-level integration test, not this module-level suite.
 // ---------------------------------------------------------------------------
 
 #include "test_framework.hpp"

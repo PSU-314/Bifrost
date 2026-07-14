@@ -2,7 +2,7 @@
 TOTP (Time-based One-Time Password) generation.
 
 Loosely inspired by RFC 6238 / HOTP (RFC 4226), but uses a custom
-HMAC-SHA1 construction that mirrors the original C++ implementation:
+HMAC-SHA256 construction that mirrors the original C++ implementation:
   - The HMAC *key*     is the hex-encoded shared secret (UTF-8 bytes).
   - The HMAC *message* is the current time-window index as a UTF-8 string.
 
@@ -14,7 +14,7 @@ HKDF-SHA256(salt=PW_KEY, ikm=TLS_exporter_secret, info="bifrost-totp-key"),
 computed once in app.py's _handle_bifrost_connection() at registration time
 and mirrored by the C++ client. This module does not perform key derivation
 — it only computes HMAC-SHA1 over the already-derived secret, matching
-totp.cpp's genSample(). TOTP_DIGEST_SIZE / HMAC-SHA1 is a known, tracked
+totp.cpp's genSample(). TOTP_DIGEST_SIZE / HMAC-SHA256 is a known, tracked
 deviation from RFC 6238 (see the TODO in totp.hpp); both sides must switch
 to HMAC-SHA256 simultaneously if that migration happens.
 """
@@ -32,7 +32,7 @@ _MODULUS = int(math.pow(10, OTP_DIGITS))  # 10^6 = 1_000_000
 
 def _gen_sample(key_bytes: bytes, time_window_index: int) -> int:
     """
-    Compute one HMAC-SHA1 sample for a given time-window index.
+    Compute one HMAC-SHA256 sample for a given time-window index.
 
     The key fed to HMAC is the *hex string* of the raw secret (UTF-8),
     matching the original C++ behaviour.  The message is the window
@@ -43,7 +43,7 @@ def _gen_sample(key_bytes: bytes, time_window_index: int) -> int:
     # Encode key as hex string bytes (mirrors C++ std::string key.hex())
     msg = time_window_index.to_bytes(8, byteorder="big")
 
-    digest = hmac.new(key_bytes, msg, hashlib.sha1).digest()
+    digest = hmac.new(key_bytes, msg, hashlib.sha256).digest()
 
     # Dynamic truncation: use the low 4 bits of the last byte as offset.
     offset = digest[-1] & 0x0F

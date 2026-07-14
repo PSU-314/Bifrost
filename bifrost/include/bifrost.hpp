@@ -1,9 +1,16 @@
+// Core shared types and filesystem-path resolution for Bifrost. Defines the
+// Byte/Bytes aliases used throughout the codebase, the well-known filenames
+// under Bifrost's config directory, and the Paths helper that resolves them
+// to full, platform-appropriate paths (XDG on Linux, Application Support on
+// macOS, %APPDATA% on Windows).
+
 #pragma once
 
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <stdexcept>
+#include <string_view>
 #include <vector>
 
 #if defined(_WIN32)
@@ -16,9 +23,6 @@ namespace fs = std::filesystem;
 using Byte = uint8_t;
 using Bytes = std::vector<Byte>;
 
-// Application directory and file name constants.
-// Centralised here so every TU sees the same strings without macro hygiene
-// concerns.
 inline constexpr std::string_view APP_DIR_NAME{"bifrost"};
 inline constexpr std::string_view CERTS_DIR_NAME{"certs"};
 inline constexpr std::string_view DEFAULT_KEYFILE{"totp-secrets.keys"};
@@ -29,7 +33,8 @@ inline constexpr std::string_view BIFROST_PROTOCOL{"bifrost-totp://"};
 
 // ---------------------------------------------------------------------------
 // Paths — static helper that resolves all well-known filesystem locations.
-// Converted macros to constexpr string_views; operator/ handles the join.
+// Path components are constexpr string_views; std::filesystem's operator/
+// joins them into full paths.
 // ---------------------------------------------------------------------------
 class Paths {
     private:
